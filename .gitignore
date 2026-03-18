@@ -1,0 +1,13 @@
+# Ignore everything by default
+*
+
+# Keep gitignore itself
+!.gitignore
+
+# Track only Python source files in home_energy_opt
+!home_energy_opt/
+!home_energy_opt/**/*.py
+
+# Track only CSV files in data
+!data/
+!data/**/*.csv

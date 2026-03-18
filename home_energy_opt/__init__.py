@@ -1,0 +1,1 @@
+"""Home energy optimization package."""
