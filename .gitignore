@@ -3,6 +3,7 @@
 
 # Keep gitignore itself
 !.gitignore
+!requirements.txt
 
 # Track only Python source files in home_energy_opt
 !home_energy_opt/
