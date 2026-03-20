@@ -176,6 +176,7 @@ class PersistentMPCSolver:
 
             # Crucial physics: home-side power must balance at each timestep.
             # External charging is intentionally handled outside the home-side balance.
+            #the equation is later set equal to the load kw in that timestep
             self.constrs["c_home_balance"][t] = m.addConstr(
                 p_grid_import + p_ev_dis_house - p_ev_home_ch == 0.0,
                 name=f"c_home_balance_{t}",
@@ -512,6 +513,7 @@ def run_mpc_loop(
     # Receding-horizon loop:
     # solve a window -> apply only first action -> shift window by 1 step.
     for i, (ts, row) in enumerate(df.iterrows()):
+        e_ev_start = e_ev
         window = df.iloc[i : i + cfg.horizon_steps]
         step: Dict[str, float] = {}
         status = "not_run"
@@ -591,12 +593,13 @@ def run_mpc_loop(
         step.update(
             {
                 "bat_energy_kwh": e_bat,
-                "ev_energy_kwh": e_ev,
+                "ev_energy_kwh": e_ev_start,
                 "ev_energy_pre_clamp_kwh": e_ev_raw,
                 "ev_soc_clamped": ev_soc_clamped,
                 "ev_soc_clamp_delta_kwh": ev_soc_clamp_delta_kwh,
                 "ev_soc_clamped_after_fallback": ev_soc_clamped_after_fallback,
                 "ev_soc_clamp_after_fallback_delta_kwh": ev_soc_clamp_delta_kwh if ev_soc_clamped_after_fallback > 0.5 else 0.0,
+                "ev_consumption_kwh": drive_kwh,
                 "solver_status": status,
                 "used_fallback": float(used_fallback),
             }

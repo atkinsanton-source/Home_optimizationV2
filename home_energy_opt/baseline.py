@@ -27,6 +27,7 @@ def simulate_baseline(df: pd.DataFrame, cfg: EnergySystemConfig) -> pd.DataFrame
     rows = []
     # Crucial idea: this is a fixed-rule controller (no optimization), so behavior is simple and predictable.
     for ts, r in df.iterrows():
+        e_ev_start = e_ev
         load_kw = float(r["load_kw"])
         drive_kwh = float(r["ev_drive_kwh"])
         ev_reserve_kwh = float(r["ev_reserve_kwh"])
@@ -95,7 +96,7 @@ def simulate_baseline(df: pd.DataFrame, cfg: EnergySystemConfig) -> pd.DataFrame
                 "ev_state": r.get("ev_state", ""),
                 "charging_point_effective": r.get("charging_point_effective", ""),
                 "bat_energy_kwh": e_bat,
-                "ev_energy_kwh": e_ev,
+                "ev_energy_kwh": e_ev_start,
                 "violations": ";".join(violations),
             }
         )

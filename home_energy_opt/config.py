@@ -77,8 +77,8 @@ class EnergySystemConfig:
     # EV
     ev_cap_kwh: float = 45
     ev_soc_init: float = 1.0
-    ev_soc_min: float = 0.05
-    ev_eta_ch: float = 0.90
+    ev_soc_min: float = 0.0
+    ev_eta_ch: float = 1.0
     ev_eta_dis: float = 0.90
 
     # Charging-point specific limits and prices
