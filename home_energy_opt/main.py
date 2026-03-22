@@ -20,7 +20,6 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--steps", type=int, default=7 * 24 * 4, help="Number of 15-min steps to simulate")
     p.add_argument("--horizon", type=int, default=96, help="MPC horizon steps")
     p.add_argument("--outdir", type=str, default="outputs", help="Output directory")
-    p.add_argument("--quiet", action="store_true", help="Disable MPC progress logging")
     p.add_argument("--progress-every", type=int, default=50, help="Print MPC progress every N solved steps")
     p.add_argument(
         "--slow-step-sec",
@@ -30,16 +29,8 @@ def parse_args() -> argparse.Namespace:
     )
     p.add_argument("--solver-tee", action="store_true", help="Print full Gurobi output for each MPC window solve")
     p.add_argument("--mipgap", type=float, default=1e-4, help="Gurobi MIP gap")
-    p.add_argument("--time-limit-sec", type=float, default=None, help="Per-window Gurobi time limit in seconds")
     p.add_argument("--threads", type=int, default=None, help="Gurobi threads")
     p.add_argument("--mipfocus", type=int, choices=[0, 1, 2, 3], default=None, help="Gurobi MIPFocus")
-    p.add_argument(
-        "--backend",
-        type=str,
-        default="gurobi",
-        choices=["gurobi", "native-gurobipy"],
-        help="MPC backend (native gurobipy only)",
-    )
     p.add_argument(
         "--legacy-gurobi-rebuild",
         action="store_true",
@@ -105,7 +96,6 @@ def main() -> None:
         system_version=args.system_version,
         horizon_steps=args.horizon,
         gurobi_mipgap=args.mipgap,
-        gurobi_time_limit_sec=args.time_limit_sec,
         gurobi_threads=args.threads,
         gurobi_mipfocus=args.mipfocus,
     )
@@ -142,11 +132,9 @@ def main() -> None:
     mpc, logs = run_mpc_loop(
         data,
         cfg,
-        show_progress=not args.quiet,
         progress_every=args.progress_every,
         slow_step_sec=args.slow_step_sec,
         solver_tee=args.solver_tee,
-        solver_backend=args.backend,
         use_persistent_gurobi=not args.legacy_gurobi_rebuild,
         use_mip_start=args.use_mip_start,
     )

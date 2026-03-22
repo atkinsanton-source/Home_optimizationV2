@@ -42,7 +42,6 @@ def main() -> None:
         data,
         cfg,
         show_progress=False,
-        solver_backend="gurobi",
         use_persistent_gurobi=False,
         use_mip_start=False,
     )
@@ -51,7 +50,6 @@ def main() -> None:
         data,
         cfg,
         show_progress=False,
-        solver_backend="gurobi",
         use_persistent_gurobi=True,
         use_mip_start=args.use_mip_start,
     )

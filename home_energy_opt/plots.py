@@ -284,23 +284,41 @@ def _build_system_connection_overview_plotly_figure(
     show_pv: bool,
 ):
     from plotly.subplots import make_subplots
+    import plotly.graph_objects as go
 
     fig = make_subplots(
-        rows=2,
+        rows=3,
         cols=1,
         shared_xaxes=True,
-        vertical_spacing=0.08,
-        subplot_titles=("Baseline", "MPC"),
-        specs=[[{"secondary_y": True}], [{"secondary_y": True}]],
+        vertical_spacing=0.06,
+        subplot_titles=("Baseline", "MPC", "Home Grid Price"),
+        specs=[[{"secondary_y": True}], [{"secondary_y": True}], [{}]],
     )
     _add_system_panel_plotly(fig, 1, index, data, baseline, show_battery=show_battery, show_pv=show_pv)
     _add_system_panel_plotly(fig, 2, index, data, mpc, show_battery=show_battery, show_pv=show_pv)
+    price_series = _get_series(data, "import_price_eur_per_kwh")
+    if price_series is None:
+        price_series = _get_series(mpc, "home_grid_price_total_eur_per_kwh")
+    if price_series is not None:
+        fig.add_trace(
+            go.Scattergl(
+                x=index,
+                y=price_series,
+                name="Home grid price (EUR/kWh)",
+                mode="lines",
+                line={"color": "#e4572e", "width": 1.7},
+            ),
+            row=3,
+            col=1,
+        )
 
     cp = _charging_point_series(data, index)
     intervals, states_present = _collect_cp_intervals(index, cp)
     row_specs = [("x", fig.layout.yaxis.domain[0], fig.layout.yaxis.domain[1])]
     if hasattr(fig.layout, "yaxis3") and fig.layout.yaxis3 is not None:
         row_specs.append(("x2", fig.layout.yaxis3.domain[0], fig.layout.yaxis3.domain[1]))
+    if hasattr(fig.layout, "yaxis5") and fig.layout.yaxis5 is not None:
+        row_specs.append(("x3", fig.layout.yaxis5.domain[0], fig.layout.yaxis5.domain[1]))
     cp_shapes = _build_cp_overlay_shapes(intervals, row_specs)
     if cp_shapes:
         existing_shapes = list(fig.layout.shapes) if fig.layout.shapes else []
@@ -311,9 +329,10 @@ def _build_system_connection_overview_plotly_figure(
     fig.update_yaxes(title_text="Power (kW)", row=1, col=1, secondary_y=True, rangemode="tozero")
     fig.update_yaxes(title_text="Energy (kWh)", row=2, col=1, secondary_y=False)
     fig.update_yaxes(title_text="Power (kW)", row=2, col=1, secondary_y=True, rangemode="tozero")
-    fig.update_xaxes(title_text="Time", row=2, col=1)
+    fig.update_yaxes(title_text="Price (EUR/kWh)", row=3, col=1)
+    fig.update_xaxes(title_text="Time", row=3, col=1)
     fig.update_layout(
-        height=900,
+        height=1100,
         width=1400,
         template="plotly_white",
         hovermode="x unified",
@@ -466,7 +485,7 @@ def save_system_connection_interactive_html(
   <h1>System Connection Dashboard</h1>
   <div class="section">
     <h2>Overview</h2>
-    <p>System connection overview including SOC, EV reserve targets, house load, grid import, and PV (if active).</p>
+    <p>System connection overview including SOC, EV reserve targets, house load, grid import, PV (if active), and home grid price.</p>
     {overview_html}
   </div>
   <div class="section">

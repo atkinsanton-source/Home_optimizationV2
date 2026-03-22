@@ -106,11 +106,9 @@ def preprocess(df: pd.DataFrame, cfg: EnergySystemConfig) -> pd.DataFrame:
     # Convert raw input columns into optimization-ready units and flags.
     out["pv_ac_kw"] = out["P_PV_AC"].clip(lower=0.0) if cfg.enable_pv else 0.0
     out["load_kw"] = out["P_load"].clip(lower=0.0)
-    day_ahead_eur_per_kwh = out["day_ahead_price"] / 100.0
+    day_ahead_eur_per_kwh = out["day_ahead_price"] / 1000.0
     out["import_price_eur_per_kwh"] = (
-        day_ahead_eur_per_kwh * (1.0 + cfg.import_price_adder_pct)
-        + cfg.import_price_adder_eur_per_kwh
-        - cfg.import_price_deduction_eur_per_kwh
+        (day_ahead_eur_per_kwh + cfg.import_price_adder_eur_per_kwh) * ((1.0 + cfg.import_price_adder_pct))
     )
     out["ev_connected_home"] = (charging_point_effective == "home").astype(int)
     out["ev_drive_kwh"] = out["EV_consumption_kWh"].clip(lower=0.0)

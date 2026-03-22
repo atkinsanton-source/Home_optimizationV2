@@ -64,7 +64,7 @@ class EnergySystemConfig:
 
     # Grid
     p_grid_max_kw: float = 44.0
-    import_price_adder_eur_per_kwh: float = 0.085 +0.025 + 0.0106 # Bundesnetzagentur Netzentgelte Durchschnitt + Stromsteuer + Konzessionsabgabe
+    import_price_adder_eur_per_kwh: float = 0.085 +0.025 + 0.0106 + 0.05# Bundesnetzagentur Netzentgelte Durchschnitt + Stromsteuer + Konzessionsabgabe + Marge Netzbetreiber
     import_price_adder_pct: float = 0.19  #Mehrwertsteuer 19%
     import_price_deduction_eur_per_kwh: float = 0.0
 
@@ -103,7 +103,6 @@ class EnergySystemConfig:
     # MPC
     horizon_steps: int = 96
     gurobi_mipgap: float = 1e-4
-    gurobi_time_limit_sec: Optional[float] = None
     gurobi_threads: Optional[int] = None
     gurobi_mipfocus: Optional[int] = None
     use_persistent_gurobi: bool = True

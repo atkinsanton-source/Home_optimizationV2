@@ -101,8 +101,6 @@ class PersistentMPCSolver:
         self.model = self.gp.Model("home_energy_mpc_persistent")
         self.model.Params.OutputFlag = 1 if solver_tee else 0
         self.model.Params.MIPGap = cfg.gurobi_mipgap
-        if cfg.gurobi_time_limit_sec is not None:
-            self.model.Params.TimeLimit = cfg.gurobi_time_limit_sec
         if cfg.gurobi_threads is not None:
             self.model.Params.Threads = cfg.gurobi_threads
         if cfg.gurobi_mipfocus is not None:
@@ -454,7 +452,6 @@ def run_mpc_loop(
     progress_every: int = 50,
     slow_step_sec: float = 2.0,
     solver_tee: bool = False,
-    solver_backend: str = "gurobi",
     use_persistent_gurobi: Optional[bool] = None,
     use_mip_start: Optional[bool] = None,
 ) -> Tuple[pd.DataFrame, List[Dict[str, object]]]:
@@ -481,13 +478,8 @@ def run_mpc_loop(
     slowest_solve_sec = -1.0
     slowest_solve_ts = ""
 
-    backend = solver_backend.strip().lower().replace("_", "-")
-    if backend in {"native", "native-gurobipy"}:
-        backend = "gurobi"
-    if backend != "gurobi":
-        raise ValueError(f"Unsupported solver backend: {solver_backend}. Only native gurobipy is supported.")
     # Force API load once so import overhead is visible in logs/progress output.
-    backend_init_sec = _load_gurobi_api()["import_seconds"]
+    gurobi_init_sec = _load_gurobi_api()["import_seconds"]
 
     persistent_solver: Optional[PersistentMPCSolver] = None
     if use_persistent_gurobi:
@@ -502,8 +494,7 @@ def run_mpc_loop(
         )
 
     if show_progress:
-        print(f"[MPC] Backend: {backend}")
-        print(f"[MPC] Backend import/init took {backend_init_sec:.2f}s")
+        print(f"[MPC] Gurobi import/init took {gurobi_init_sec:.2f}s")
         print(
             f"[MPC] Starting rolling optimization: steps={n_steps}, horizon={cfg.horizon_steps}, "
             f"report_every={progress_every}, slow_step_sec={slow_step_sec:.2f}"
@@ -664,6 +655,7 @@ def run_mpc_loop(
         - df["ev_export_price_eur_per_kwh"] * out["grid_export_kwh"]
         + out["ext_charge_cost_eur"]
     )
+    out["home_grid_price_total_eur_per_kwh"] = df["import_price_eur_per_kwh"]
     out["ev_state"] = df["ev_state"]
     out["charging_point_effective"] = df["charging_point_effective"]
     return out, logs
