@@ -18,3 +18,6 @@
 !scripts/
 !scripts/regression_persistent_mpc.py
 !scripts/plot_dashboard_from_outputs.py
+
+# Track changes to the draw.io file
+!!**/*.draw.io
