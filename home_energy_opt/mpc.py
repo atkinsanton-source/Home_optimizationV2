@@ -9,6 +9,8 @@ import pandas as pd
 from home_energy_opt.config import EnergySystemConfig
 
 _GUROBI_API: Optional[Dict[str, Any]] = None
+# Treat smaller clamp deltas as pure floating-point noise.
+EV_SOC_CLAMP_EPS_KWH = 1e-5
 
 
 def _load_gurobi_api() -> Dict[str, Any]:
@@ -577,7 +579,9 @@ def run_mpc_loop(
         ev_lb_now = _effective_ev_lb(cfg, float(row["ev_reserve_kwh"]))
         e_ev = min(max(e_ev_raw, ev_lb_now), cfg.ev_cap_kwh)
         ev_soc_clamp_delta_kwh = e_ev - e_ev_raw
-        ev_soc_clamped = float(abs(ev_soc_clamp_delta_kwh) > 1e-9)
+        if abs(ev_soc_clamp_delta_kwh) <= EV_SOC_CLAMP_EPS_KWH:
+            ev_soc_clamp_delta_kwh = 0.0
+        ev_soc_clamped = float(abs(ev_soc_clamp_delta_kwh) > 0.0)
         ev_soc_clamped_after_fallback = float(used_fallback and ev_soc_clamped > 0.5)
         e_bat = min(max(e_bat, cfg.bat_soc_min * cfg.bat_cap_kwh), cfg.bat_soc_max * cfg.bat_cap_kwh)
 

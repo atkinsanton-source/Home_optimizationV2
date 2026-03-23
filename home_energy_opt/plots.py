@@ -351,13 +351,14 @@ def _build_flow_balance_figure(
     show_pv: bool,
 ):
     from plotly.subplots import make_subplots
+    import plotly.graph_objects as go
 
     fig = make_subplots(
-        rows=2,
+        rows=3,
         cols=1,
         shared_xaxes=True,
-        vertical_spacing=0.08,
-        subplot_titles=("Baseline", "MPC"),
+        vertical_spacing=0.06,
+        subplot_titles=("Baseline", "MPC", "Home Grid Price"),
     )
 
     legend_seen: set[str] = set()
@@ -381,12 +382,32 @@ def _build_flow_balance_figure(
         show_pv=show_pv,
         legend_seen=legend_seen,
     )
+    price_series = _get_series(data, "import_price_eur_per_kwh")
+    if price_series is None:
+        price_series = _get_series(mpc, "home_grid_price_total_eur_per_kwh")
+    if price_series is not None:
+        fig.add_trace(
+            go.Scattergl(
+                x=index,
+                y=price_series,
+                name="Home grid price (EUR/kWh)",
+                legendgroup="Home grid price (EUR/kWh)",
+                showlegend="Home grid price (EUR/kWh)" not in legend_seen,
+                mode="lines",
+                line={"color": "#e4572e", "width": 1.7},
+            ),
+            row=3,
+            col=1,
+        )
+        legend_seen.add("Home grid price (EUR/kWh)")
 
     cp = _charging_point_series(data, index)
     intervals, states_present = _collect_cp_intervals(index, cp)
     row_specs = [("x", fig.layout.yaxis.domain[0], fig.layout.yaxis.domain[1])]
     if hasattr(fig.layout, "yaxis2") and fig.layout.yaxis2 is not None:
         row_specs.append(("x2", fig.layout.yaxis2.domain[0], fig.layout.yaxis2.domain[1]))
+    if hasattr(fig.layout, "yaxis3") and fig.layout.yaxis3 is not None:
+        row_specs.append(("x3", fig.layout.yaxis3.domain[0], fig.layout.yaxis3.domain[1]))
     cp_shapes = _build_cp_overlay_shapes(intervals, row_specs)
     if cp_shapes:
         existing_shapes = list(fig.layout.shapes) if fig.layout.shapes else []
@@ -395,11 +416,12 @@ def _build_flow_balance_figure(
 
     fig.update_yaxes(title_text="Power (kW)", row=1, col=1)
     fig.update_yaxes(title_text="Power (kW)", row=2, col=1)
-    fig.update_xaxes(title_text="Time", row=2, col=1)
+    fig.update_yaxes(title_text="Price (EUR/kWh)", row=3, col=1)
+    fig.update_xaxes(title_text="Time", row=3, col=1)
     fig.add_hline(y=0.0, line_width=1.0, line_dash="dot", line_color="#555555", row=1, col=1)
     fig.add_hline(y=0.0, line_width=1.0, line_dash="dot", line_color="#555555", row=2, col=1)
     fig.update_layout(
-        height=900,
+        height=1100,
         width=1400,
         template="plotly_white",
         hovermode="x unified",
@@ -490,7 +512,7 @@ def save_system_connection_interactive_html(
   </div>
   <div class="section">
     <h2>Flow Balance</h2>
-    <p>Power flow balance: sources (negative) and sinks (positive).</p>
+    <p>Power flow balance: sources (negative) and sinks (positive), with home grid price at the bottom.</p>
     {flow_html}
   </div>
 </body>
