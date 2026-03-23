@@ -64,7 +64,7 @@ class EnergySystemConfig:
 
     # Grid
     p_grid_max_kw: float = 44.0
-    import_price_adder_eur_per_kwh: float = 0.085 +0.025 + 0.0106 + 0.05# Bundesnetzagentur Netzentgelte Durchschnitt + Stromsteuer + Konzessionsabgabe + Marge Netzbetreiber
+    import_price_adder_eur_per_kwh: float = 0.085 +0.025 + 0.0106 + 0.02 #Bundesnetzagentur Netzentgelte Durchschnitt + Stromsteuer + Konzessionsabgabe + Marge Netzbetreiber
     import_price_adder_pct: float = 0.19  #Mehrwertsteuer 19%
     import_price_deduction_eur_per_kwh: float = 0.0
 
@@ -75,7 +75,7 @@ class EnergySystemConfig:
     export_price_deduction_eur_per_kwh: float = 0.0
 
     # EV
-    ev_cap_kwh: float = 45
+    ev_cap_kwh: float = 79.5
     ev_soc_init: float = 1.0
     ev_soc_min: float = 0.0
     ev_eta_ch: float = 1.0
