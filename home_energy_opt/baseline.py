@@ -109,9 +109,13 @@ def simulate_baseline(df: pd.DataFrame, cfg: EnergySystemConfig) -> pd.DataFrame
     result["ev_ext_ch_kwh"] = result["ev_ext_ch_kw"] * cfg.dt_hours
     result["ev_dis_to_home_kwh"] = result["ev_dis_to_home_kw"] * cfg.dt_hours
     result["ev_dis_to_grid_kwh"] = result["ev_dis_to_grid_kw"] * cfg.dt_hours
+    result["ev_battery_degradation_cost_eur"] = (
+        float(cfg.ev_degradation_eur_per_kwh_charged) * (result["ev_home_ch_kwh"] + result["ev_ext_ch_kwh"])
+    )
     result["step_cost_eur"] = (
         df["import_price_eur_per_kwh"] * result["grid_import_kwh"]
         - df["ev_export_price_eur_per_kwh"] * result["grid_export_kwh"]
         + result["ext_charge_cost_eur"]
+        + result["ev_battery_degradation_cost_eur"]
     )
     return result

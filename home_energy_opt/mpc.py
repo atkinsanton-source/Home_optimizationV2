@@ -264,14 +264,15 @@ class PersistentMPCSolver:
     ) -> None:
         # Objective is linear operating cost per step.
         dt = self.cfg.dt_hours
+        ev_degradation_cost = float(self.cfg.ev_degradation_eur_per_kwh_charged) * dt
         for t in range(self.H):
             self.vars["p_grid_import"][t].Obj = float(home_import_price[t]) * dt
             if self.vars["p_grid_export"] is not None:
                 self.vars["p_grid_export"][t].Obj = -float(ev_export_price[t]) * dt
             if self.vars["p_ev_ext_ch"] is not None:
-                self.vars["p_ev_ext_ch"][t].Obj = float(ev_ext_import_price[t]) * dt
+                self.vars["p_ev_ext_ch"][t].Obj = float(ev_ext_import_price[t]) * dt + ev_degradation_cost
             if self.vars["p_ev_home_ch"] is not None:
-                self.vars["p_ev_home_ch"][t].Obj = 0.0
+                self.vars["p_ev_home_ch"][t].Obj = ev_degradation_cost
             if self.vars["p_ev_dis_house"] is not None:
                 self.vars["p_ev_dis_house"][t].Obj = 0.0
             if self.vars["p_ev_dis_grid"] is not None:
@@ -654,10 +655,14 @@ def run_mpc_loop(
     out["ev_dis_to_home_kwh"] = out["ev_dis_to_home_kw"] * cfg.dt_hours
     out["ev_dis_to_grid_kwh"] = out["ev_dis_to_grid_kw"] * cfg.dt_hours
     out["ext_charge_cost_eur"] = df["ev_ext_import_price_eur_per_kwh"] * out["ev_ext_ch_kwh"]
+    out["ev_battery_degradation_cost_eur"] = (
+        float(cfg.ev_degradation_eur_per_kwh_charged) * (out["ev_home_ch_kwh"] + out["ev_ext_ch_kwh"])
+    )
     out["step_cost_eur"] = (
         df["import_price_eur_per_kwh"] * out["grid_import_kwh"]
         - df["ev_export_price_eur_per_kwh"] * out["grid_export_kwh"]
         + out["ext_charge_cost_eur"]
+        + out["ev_battery_degradation_cost_eur"]
     )
     out["home_grid_price_total_eur_per_kwh"] = df["import_price_eur_per_kwh"]
     out["ev_state"] = df["ev_state"]

@@ -69,7 +69,7 @@ class EnergySystemConfig:
     import_price_deduction_eur_per_kwh: float = 0.0
 
     # Export remuneration
-    export_price_source: str = "fixed"  # "fixed" or "dynamic"
+    export_price_source: str = "dynamic"  # "fixed" or "dynamic"
     export_price_eur_per_kwh: float = 0.0778
     export_price_adder_eur_per_kwh: float = 0.0
     export_price_deduction_eur_per_kwh: float = 0.0
@@ -113,6 +113,7 @@ class EnergySystemConfig:
     # Extension hooks
     enable_battery_degradation_cost: bool = False
     battery_degradation_eur_per_kwh: float = 0.0
+    ev_degradation_eur_per_kwh_charged: float = 0.067
 
     def __post_init__(self) -> None:
         if self.apply_version_preset:

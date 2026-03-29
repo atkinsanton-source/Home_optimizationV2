@@ -38,6 +38,7 @@ def summarize_metrics(inp: pd.DataFrame, sim: pd.DataFrame, cfg: EnergySystemCon
         "grid_export_kwh": float(sim["grid_export_kwh"].sum()),
         "external_charge_kwh": _sum_col(sim, "ev_ext_ch_kwh"),
         "external_charge_cost_eur": _sum_col(sim, "ext_charge_cost_eur"),
+        "ev_battery_degradation_cost_eur": _sum_col(sim, "ev_battery_degradation_cost_eur"),
         "home_ev_charge_kwh": _sum_col(sim, "ev_home_ch_kwh"),
         "ev_discharge_to_home_kwh": _sum_col(sim, "ev_dis_to_home_kwh"),
         "ev_discharge_to_grid_kwh": _sum_col(sim, "ev_dis_to_grid_kwh"),
