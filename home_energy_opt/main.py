@@ -85,7 +85,7 @@ def main() -> None:
     t_stage = perf_counter()
     import pandas as pd
 
-    from home_energy_opt.baseline import simulate_baseline
+    from home_energy_opt.baseline import BaselineDynamic, BaselineStatic
     from home_energy_opt.config import EnergySystemConfig
     from home_energy_opt.data import load_csv, preprocess
     from home_energy_opt.metrics import summarize_metrics
@@ -114,11 +114,12 @@ def main() -> None:
     data = preprocess(raw, cfg).iloc[: args.steps].copy()
     print(f"[stage] Preprocessing data done in {perf_counter() - t_stage:.2f}s", flush=True)
 
-    # 3) Run the rule-based baseline controller as reference.
+    # 3) Run both rule-based baseline variants (dynamic/static home import tariff).
     t_stage = perf_counter()
-    _stage("Running baseline simulation")
-    baseline = simulate_baseline(data, cfg)
-    print(f"[stage] Baseline simulation done in {perf_counter() - t_stage:.2f}s", flush=True)
+    _stage("Running baseline simulations")
+    baseline_dynamic = BaselineDynamic().simulate(data, cfg)
+    baseline_static = BaselineStatic().simulate(data, cfg)
+    print(f"[stage] Baseline simulations done in {perf_counter() - t_stage:.2f}s", flush=True)
 
     # 4) Import MPC lazily to avoid solver import overhead when not needed.
     t_stage = perf_counter()
@@ -146,7 +147,10 @@ def main() -> None:
     outdir = Path(args.outdir)
     outdir.mkdir(parents=True, exist_ok=True)
 
-    baseline.to_csv(outdir / "baseline_results.csv")
+    # Keep baseline_results.csv as dynamic for backward compatibility with existing scripts.
+    baseline_dynamic.to_csv(outdir / "baseline_results.csv")
+    baseline_dynamic.to_csv(outdir / "baseline_dynamic_results.csv")
+    baseline_static.to_csv(outdir / "baseline_static_results.csv")
     mpc.to_csv(outdir / "mpc_results.csv")
     pd.DataFrame(logs).to_csv(outdir / "mpc_solver_logs.csv", index=False)
 
@@ -177,9 +181,13 @@ def main() -> None:
     # 7) Aggregate KPIs for both strategies into one comparison table.
     t_stage = perf_counter()
     _stage("Computing metrics")
-    metrics_baseline = summarize_metrics(data, baseline, cfg)
+    metrics_baseline_dynamic = summarize_metrics(data, baseline_dynamic, cfg)
+    metrics_baseline_static = summarize_metrics(data, baseline_static, cfg)
     metrics_mpc = summarize_metrics(data, mpc, cfg)
-    metrics = pd.DataFrame([metrics_baseline, metrics_mpc], index=["baseline", "mpc"])
+    metrics = pd.DataFrame(
+        [metrics_baseline_dynamic, metrics_baseline_static, metrics_mpc],
+        index=["baseline_dynamic", "baseline_static", "mpc"],
+    )
     metrics.to_csv(outdir / "metrics_comparison.csv")
     print(f"[stage] Computing metrics done in {perf_counter() - t_stage:.2f}s", flush=True)
 
@@ -191,7 +199,7 @@ def main() -> None:
     save_system_connection_interactive_html(
         data.index,
         data,
-        baseline,
+        baseline_dynamic,
         mpc,
         str(outdir / "system_connection_comparison_interactive.html"),
         show_battery=cfg.enable_battery,
@@ -200,8 +208,10 @@ def main() -> None:
     print("[stage] Interactive HTML export ready", flush=True)
     print(f"[stage] Generating plots done in {perf_counter() - t_stage:.2f}s", flush=True)
 
-    print("Baseline metrics:")
-    print(metrics.loc["baseline"])
+    print("Baseline dynamic metrics:")
+    print(metrics.loc["baseline_dynamic"])
+    print("\nBaseline static metrics:")
+    print(metrics.loc["baseline_static"])
     print("\nMPC metrics:")
     print(metrics.loc["mpc"])
     print("\nSimultaneous opposite-flow counts (MPC run):")

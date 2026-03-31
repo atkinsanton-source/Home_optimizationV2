@@ -1,9 +1,10 @@
 # Home Energy Optimization
 
-Modular Python project for year-long 15-minute home energy simulation with two scenarios:
+Modular Python project for year-long 15-minute home energy simulation with three scenarios:
 
-1. **Baseline rule-based control**
-2. **MPC optimization (native gurobipy rolling-horizon model)**
+1. **Baseline rule-based control (dynamic home import price)**
+2. **Baseline rule-based control (static home import price)**
+3. **MPC optimization (native gurobipy rolling-horizon model)**
 
 ## Structure
 
@@ -49,11 +50,17 @@ python scripts/plot_dashboard_from_outputs.py data/your_timeseries.csv --system-
 Outputs:
 
 - `baseline_results.csv`
+- `baseline_dynamic_results.csv`
+- `baseline_static_results.csv`
 - `mpc_results.csv`
 - `mpc_solver_logs.csv`
 - `metrics_comparison.csv`
 - `system_connection_comparison_interactive.html` (interactive zoom/pan with dynamic axes after reopening; includes Overview + Flow Balance sections with `sources < 0`, `sinks > 0`)
 - `plotly.min.js` (local Plotly runtime copied next to the HTML for offline interaction)
+
+## Baseline Static Price Knob
+
+Set `baseline_static_import_price_eur_per_kwh` in `home_energy_opt/config.py` to control the static home import tariff used by the static baseline.
 
 ## Extension hooks already prepared
 

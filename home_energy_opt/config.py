@@ -67,11 +67,12 @@ class EnergySystemConfig:
     import_price_adder_eur_per_kwh: float = 0.085 +0.025 + 0.0106 + 0.02 #Bundesnetzagentur Netzentgelte Durchschnitt + Stromsteuer + Konzessionsabgabe + Marge Netzbetreiber
     import_price_adder_pct: float = 0.19  #Mehrwertsteuer 19%
     import_price_deduction_eur_per_kwh: float = 0.0
+    baseline_static_import_price_eur_per_kwh: float = 0.35
 
     # Export remuneration
     export_price_source: str = "dynamic"  # "fixed" or "dynamic"
     export_price_eur_per_kwh: float = 0.0778
-    export_price_adder_eur_per_kwh: float = 0.0
+    export_price_adder_eur_per_kwh: float = 0.085
     export_price_deduction_eur_per_kwh: float = 0.0
 
     # EV
