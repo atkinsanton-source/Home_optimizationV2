@@ -32,10 +32,9 @@ def _load_gurobi_api() -> Dict[str, Any]:
 
 
 def _effective_ev_lb(cfg: EnergySystemConfig, reserve_kwh: float) -> float:
-    """Single EV lower bound per step: max(fixed minimum, bounded reserve)."""
-    fixed_min = cfg.ev_soc_min * cfg.ev_cap_kwh
-    reserve_bounded = min(float(reserve_kwh), cfg.ev_cap_kwh)
-    return max(fixed_min, reserve_bounded)
+    """Single EV lower bound per step from provided reserve, bounded to physical limits."""
+    reserve_bounded = min(max(float(reserve_kwh), 0.0), cfg.ev_cap_kwh)
+    return reserve_bounded
 
 
 @dataclass
@@ -67,11 +66,19 @@ class WindowDataManager:
                         tail[col] = float(cfg.pad_tail_price_eur_per_kwh)
             window = pd.concat([window, pd.concat([tail] * pad_rows, ignore_index=False)], axis=0)
 
+        ev_reserve_kwh = window["ev_reserve_kwh"].astype(float).tolist()
+        # Terminal reserve corresponds to state E_ev[H] (one step beyond control horizon).
+        # When i+H is unavailable at dataset end, use 0.0 so terminal state is only physically bounded.
+        if i + H < len(df):
+            ev_reserve_kwh.append(float(df.iloc[i + H]["ev_reserve_kwh"]))
+        else:
+            ev_reserve_kwh.append(0.0)
+
         return {
             "load_kw": window["load_kw"].astype(float).tolist(),
             "home_import_price": window["import_price_eur_per_kwh"].astype(float).tolist(),
             "ev_drive_kwh": window["ev_drive_kwh"].astype(float).tolist(),
-            "ev_reserve_kwh": window["ev_reserve_kwh"].astype(float).tolist(),
+            "ev_reserve_kwh": ev_reserve_kwh,
             "ev_p_home_ch_max_kw": window["ev_p_home_ch_max_kw"].astype(float).tolist(),
             "ev_p_ext_ch_max_kw": window["ev_p_ext_ch_max_kw"].astype(float).tolist(),
             "ev_p_ch_total_max_kw": window["ev_p_ch_total_max_kw"].astype(float).tolist(),
@@ -116,9 +123,6 @@ class PersistentMPCSolver:
             return None
         return self.model.addVars(range(self.H), lb=0.0, ub=ub, name=name)
 
-    def _terminal_reserve_lb(self, ev_reserve_kwh: List[float]) -> float:
-        return _effective_ev_lb(self.cfg, ev_reserve_kwh[-1])
-
     def _build_model(self) -> None:
         cfg = self.cfg
         H = self.H
@@ -160,7 +164,6 @@ class PersistentMPCSolver:
             "c_home_balance": {},
             "c_ev_dyn": {},
             "c_ev_lb": {},
-            "c_ev_lb_terminal": m.addConstr(self.vars["E_ev"][H] >= 0.0, name="c_ev_lb_terminal"),
             "c_export_link": {},
             "c_ev_ch_total": {},
             "c_ev_dis_total": {},
@@ -208,7 +211,6 @@ class PersistentMPCSolver:
                 self.vars["E_ev"][t + 1] == self.vars["E_ev"][t] + (charge_term - discharge_term) * cfg.dt_hours,
                 name=f"c_ev_dyn_{t}",
             )
-            self.constrs["c_ev_lb"][t] = m.addConstr(self.vars["E_ev"][t] >= 0.0, name=f"c_ev_lb_{t}")
 
             if self.vars["y_grid_dir"] is not None and self.vars["p_grid_export"] is not None:
                 # Direction binary enforces mutual exclusion between importing and exporting.
@@ -246,6 +248,7 @@ class PersistentMPCSolver:
                     )
 
         for t in Te:
+            self.constrs["c_ev_lb"][t] = m.addConstr(self.vars["E_ev"][t] >= 0.0, name=f"c_ev_lb_{t}")
             m.addConstr(self.vars["E_ev"][t] <= cfg.ev_cap_kwh, name=f"c_ev_max_{t}")
 
         self._set_objective_coeffs(
@@ -301,7 +304,6 @@ class PersistentMPCSolver:
             # Update forecast-dependent constraints for each look-ahead step.
             self.constrs["c_home_balance"][t].RHS = float(window_arrays["load_kw"][t])
             self.constrs["c_ev_dyn"][t].RHS = -float(window_arrays["ev_drive_kwh"][t])
-            self.constrs["c_ev_lb"][t].RHS = _effective_ev_lb(self.cfg, window_arrays["ev_reserve_kwh"][t])
 
             # Update power limits from connection state (home, external, unavailable).
             self._set_ub("p_ev_home_ch", t, window_arrays["ev_p_home_ch_max_kw"][t])
@@ -312,7 +314,8 @@ class PersistentMPCSolver:
                 self.constrs["c_ev_ch_total"][t].RHS = float(window_arrays["ev_p_ch_total_max_kw"][t])
             if t in self.constrs["c_ev_dis_total"]:
                 self.constrs["c_ev_dis_total"][t].RHS = float(window_arrays["ev_p_dis_total_max_kw"][t])
-        self.constrs["c_ev_lb_terminal"].RHS = self._terminal_reserve_lb(window_arrays["ev_reserve_kwh"])
+        for t in range(self.H + 1):
+            self.constrs["c_ev_lb"][t].RHS = _effective_ev_lb(self.cfg, window_arrays["ev_reserve_kwh"][t])
 
         self._set_objective_coeffs(
             home_import_price=window_arrays["home_import_price"],
@@ -477,6 +480,7 @@ def run_mpc_loop(
     logs: List[Dict[str, object]] = []
     rows: List[Dict[str, float]] = []
     n_steps = len(df)
+    ev_reserve_kwh_by_step = pd.to_numeric(df["ev_reserve_kwh"], errors="coerce").fillna(0.0).astype(float).tolist()
     t_loop_start = perf_counter()
     slowest_solve_sec = -1.0
     slowest_solve_ts = ""
@@ -504,10 +508,16 @@ def run_mpc_loop(
         )
 
     prev_solution: Optional[Dict[str, List[float]]] = None
+    # Diagnostics timing state:
+    # - `prev_e_ev_raw` becomes this row's start-of-step raw EV energy.
+    # - `prev_used_fallback` links current clamp diagnostics to the previous step action source.
+    prev_e_ev_raw = e_ev
+    prev_used_fallback = 0
     # Receding-horizon loop:
     # solve a window -> apply only first action -> shift window by 1 step.
     for i, (ts, row) in enumerate(df.iterrows()):
         e_ev_start = e_ev
+        e_ev_pre_clamp_start = prev_e_ev_raw
         window = df.iloc[i : i + cfg.horizon_steps]
         step: Dict[str, float] = {}
         status = "not_run"
@@ -568,7 +578,7 @@ def run_mpc_loop(
 
         drive_kwh = float(row["ev_drive_kwh"])
         # Crucial state transition: previous energy + charging - discharging - driving consumption.
-        e_ev_raw = (
+        e_ev_raw_next = (
             e_ev
             + (cfg.ev_eta_ch * (step["ev_home_ch_kw"] + step["ev_ext_ch_kw"]))
             * cfg.dt_hours
@@ -576,21 +586,27 @@ def run_mpc_loop(
             - drive_kwh
         )
 
-        # Clamp to feasible range; keep delta for debugging whether clamping happened.
-        ev_lb_now = _effective_ev_lb(cfg, float(row["ev_reserve_kwh"]))
-        e_ev = min(max(e_ev_raw, ev_lb_now), cfg.ev_cap_kwh)
-        ev_soc_clamp_delta_kwh = e_ev - e_ev_raw
+        # Clamp carried state against the reserve of the step it will be used in (i+1),
+        # not the reserve of the action step (i), to avoid a one-step timing mismatch.
+        if i + 1 < n_steps:
+            ev_lb_carry = _effective_ev_lb(cfg, ev_reserve_kwh_by_step[i + 1])
+        else:
+            ev_lb_carry = _effective_ev_lb(cfg, ev_reserve_kwh_by_step[i])
+        e_ev = min(max(e_ev_raw_next, ev_lb_carry), cfg.ev_cap_kwh)
+        # Clamp diagnostics are reported as start-of-step quantities:
+        # compare current clamped start state vs previous step raw carry-over.
+        ev_soc_clamp_delta_kwh = e_ev_start - e_ev_pre_clamp_start
         if abs(ev_soc_clamp_delta_kwh) <= EV_SOC_CLAMP_EPS_KWH:
             ev_soc_clamp_delta_kwh = 0.0
         ev_soc_clamped = float(abs(ev_soc_clamp_delta_kwh) > 0.0)
-        ev_soc_clamped_after_fallback = float(used_fallback and ev_soc_clamped > 0.5)
+        ev_soc_clamped_after_fallback = float(prev_used_fallback and ev_soc_clamped > 0.5)
         e_bat = min(max(e_bat, cfg.bat_soc_min * cfg.bat_cap_kwh), cfg.bat_soc_max * cfg.bat_cap_kwh)
 
         step.update(
             {
                 "bat_energy_kwh": e_bat,
                 "ev_energy_kwh": e_ev_start,
-                "ev_energy_pre_clamp_kwh": e_ev_raw,
+                "ev_energy_pre_clamp_kwh": e_ev_pre_clamp_start,
                 "ev_soc_clamped": ev_soc_clamped,
                 "ev_soc_clamp_delta_kwh": ev_soc_clamp_delta_kwh,
                 "ev_soc_clamped_after_fallback": ev_soc_clamped_after_fallback,
@@ -640,6 +656,10 @@ def run_mpc_loop(
                     f"eta={eta_sec / 60.0:.1f}m status={status}"
                 )
 
+        # Carry timing state for next row diagnostics.
+        prev_e_ev_raw = e_ev_raw_next
+        prev_used_fallback = used_fallback
+
     if show_progress:
         total_elapsed_sec = perf_counter() - t_loop_start
         print(
@@ -665,6 +685,7 @@ def run_mpc_loop(
         + out["ev_battery_degradation_cost_eur"]
     )
     out["home_grid_price_total_eur_per_kwh"] = df["import_price_eur_per_kwh"]
+    out["ev_reserve_kwh"] = df["ev_reserve_kwh"]
     out["ev_state"] = df["ev_state"]
     out["charging_point_effective"] = df["charging_point_effective"]
     return out, logs

@@ -58,5 +58,7 @@ def summarize_metrics(inp: pd.DataFrame, sim: pd.DataFrame, cfg: EnergySystemCon
         "bat_soc_violations": int(
             ((sim["bat_energy_kwh"] < cfg.bat_soc_min * cfg.bat_cap_kwh) | (sim["bat_energy_kwh"] > cfg.bat_soc_max * cfg.bat_cap_kwh)).sum()
         ),
-        "ev_soc_violations": int(((sim["ev_energy_kwh"] < cfg.ev_soc_min * cfg.ev_cap_kwh) | (sim["ev_energy_kwh"] > cfg.ev_cap_kwh)).sum()),
+        "ev_soc_violations_fixed_reserve": int(
+            ((sim["ev_energy_kwh"] < cfg.ev_soc_min * cfg.ev_cap_kwh) | (sim["ev_energy_kwh"] > cfg.ev_cap_kwh)).sum()
+        ),
     }

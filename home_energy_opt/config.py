@@ -64,21 +64,21 @@ class EnergySystemConfig:
 
     # Grid
     p_grid_max_kw: float = 44.0
-    import_price_adder_eur_per_kwh: float = 0.085 +0.025 + 0.0106 + 0.02 #Bundesnetzagentur Netzentgelte Durchschnitt + Stromsteuer + Konzessionsabgabe + Marge Netzbetreiber
+    import_price_adder_eur_per_kwh: float = 0.1944 #Von Octopus Energy
     import_price_adder_pct: float = 0.19  #Mehrwertsteuer 19%
     import_price_deduction_eur_per_kwh: float = 0.0
-    baseline_static_import_price_eur_per_kwh: float = 0.35
+    baseline_static_import_price_eur_per_kwh: float = 0.3627
 
     # Export remuneration
     export_price_source: str = "dynamic"  # "fixed" or "dynamic"
     export_price_eur_per_kwh: float = 0.0778
-    export_price_adder_eur_per_kwh: float = 0.085
+    export_price_adder_eur_per_kwh: float = 0.0888 #Stromnetz Berlin dokument für 2026 Netzentgelt
     export_price_deduction_eur_per_kwh: float = 0.0
 
     # EV
     ev_cap_kwh: float = 79.5
     ev_soc_init: float = 1.0
-    ev_soc_min: float = 0.0
+    ev_soc_min: float = 0.3
     ev_eta_ch: float = 1.0
     ev_eta_dis: float = 0.90
 

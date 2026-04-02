@@ -147,7 +147,7 @@ def _add_system_panel_plotly(
     fig.add_trace(
         go.Scattergl(
             x=index,
-            y=data["ev_reserve_kwh"],
+            y=result["ev_reserve_kwh"],
             name="EV required next 24h (clamped) (kWh)",
             mode="lines",
             line={"color": "#17becf", "width": 1.3, "dash": "dash"},

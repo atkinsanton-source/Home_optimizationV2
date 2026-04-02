@@ -121,6 +121,19 @@ def main() -> None:
     baseline_static = BaselineStatic().simulate(data, cfg)
     print(f"[stage] Baseline simulations done in {perf_counter() - t_stage:.2f}s", flush=True)
 
+    # Build MPC-only reserve profile: fixed reserve by default, baseline SOC when below fixed.
+    data_mpc = data.copy()
+    fixed_reserve_kwh = cfg.ev_soc_min * cfg.ev_cap_kwh
+    baseline_soc_kwh = pd.to_numeric(baseline_dynamic["ev_energy_kwh"], errors="coerce").reindex(data_mpc.index).fillna(0.0)
+    adaptive_reserve_kwh = pd.Series(fixed_reserve_kwh, index=data_mpc.index, dtype=float)
+    baseline_below_fixed_mask = baseline_soc_kwh < fixed_reserve_kwh
+    adaptive_reserve_kwh.loc[baseline_below_fixed_mask] = baseline_soc_kwh.loc[baseline_below_fixed_mask]
+    adaptive_reserve_kwh = adaptive_reserve_kwh.clip(lower=0.0, upper=cfg.ev_cap_kwh)
+    data_mpc["ev_reserve_kwh"] = adaptive_reserve_kwh
+    # Export adaptive reserve profile for both baseline and MPC result tables.
+    baseline_dynamic["ev_reserve_kwh"] = adaptive_reserve_kwh.reindex(baseline_dynamic.index).astype(float)
+    baseline_static["ev_reserve_kwh"] = adaptive_reserve_kwh.reindex(baseline_static.index).astype(float)
+
     # 4) Import MPC lazily to avoid solver import overhead when not needed.
     t_stage = perf_counter()
     _stage("Importing MPC module")
@@ -131,7 +144,7 @@ def main() -> None:
     t_stage = perf_counter()
     _stage("Running MPC loop")
     mpc, logs = run_mpc_loop(
-        data,
+        data_mpc,
         cfg,
         progress_every=args.progress_every,
         slow_step_sec=args.slow_step_sec,
@@ -140,6 +153,32 @@ def main() -> None:
         use_mip_start=args.use_mip_start,
     )
     print(f"[stage] Running MPC loop done in {perf_counter() - t_stage:.2f}s", flush=True)
+
+    # Sanity check: when baseline SOC is below fixed reserve, MPC SOC must not drop below baseline SOC.
+    sanity_eps = 1e-6
+    mpc_soc_kwh = pd.to_numeric(mpc["ev_energy_kwh"], errors="coerce").reindex(data_mpc.index).fillna(0.0)
+    sanity_mask = baseline_soc_kwh < fixed_reserve_kwh
+    sanity_deficit_kwh = baseline_soc_kwh - mpc_soc_kwh
+    sanity_violation_mask = sanity_mask & (sanity_deficit_kwh > sanity_eps)
+    sanity_violation_steps = int(sanity_violation_mask.sum())
+    sanity_max_deficit_kwh = float(sanity_deficit_kwh.loc[sanity_violation_mask].max()) if sanity_violation_steps > 0 else 0.0
+    print(
+        "[sanity] adaptive-reserve check: "
+        f"masked_steps={int(sanity_mask.sum())}, "
+        f"violations={sanity_violation_steps}, "
+        f"max_deficit_kwh={sanity_max_deficit_kwh:.6f}",
+        flush=True,
+    )
+    sanity_violations_df = pd.DataFrame(
+        {
+            "baseline_soc_kwh": baseline_soc_kwh,
+            "mpc_soc_kwh": mpc_soc_kwh,
+            "fixed_reserve_kwh": fixed_reserve_kwh,
+            "deficit_kwh": sanity_deficit_kwh,
+        },
+        index=data_mpc.index,
+    ).loc[sanity_violation_mask]
+    sanity_violations_df.index.name = "timestamp"
 
     # 6) Persist raw simulation outputs so they can be inspected later.
     t_stage = perf_counter()
@@ -153,6 +192,7 @@ def main() -> None:
     baseline_static.to_csv(outdir / "baseline_static_results.csv")
     mpc.to_csv(outdir / "mpc_results.csv")
     pd.DataFrame(logs).to_csv(outdir / "mpc_solver_logs.csv", index=False)
+    sanity_violations_df.to_csv(outdir / "mpc_baseline_reserve_sanity_violations.csv")
 
     # Detect simultaneous opposite flows from the already-solved MPC trajectory.
     grid_mask = _overlap_mask(mpc["grid_import_kw"], mpc["grid_export_kw"])
@@ -183,7 +223,15 @@ def main() -> None:
     _stage("Computing metrics")
     metrics_baseline_dynamic = summarize_metrics(data, baseline_dynamic, cfg)
     metrics_baseline_static = summarize_metrics(data, baseline_static, cfg)
-    metrics_mpc = summarize_metrics(data, mpc, cfg)
+    metrics_mpc = summarize_metrics(data_mpc, mpc, cfg)
+    sanity_count_key = "mpc_baseline_reserve_sanity_violation_steps"
+    sanity_max_deficit_key = "mpc_baseline_reserve_sanity_max_deficit_kwh"
+    metrics_baseline_dynamic[sanity_count_key] = 0.0
+    metrics_baseline_dynamic[sanity_max_deficit_key] = 0.0
+    metrics_baseline_static[sanity_count_key] = 0.0
+    metrics_baseline_static[sanity_max_deficit_key] = 0.0
+    metrics_mpc[sanity_count_key] = float(sanity_violation_steps)
+    metrics_mpc[sanity_max_deficit_key] = sanity_max_deficit_kwh
     metrics = pd.DataFrame(
         [metrics_baseline_dynamic, metrics_baseline_static, metrics_mpc],
         index=["baseline_dynamic", "baseline_static", "mpc"],
