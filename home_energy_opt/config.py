@@ -72,11 +72,11 @@ class EnergySystemConfig:
     # Export remuneration
     export_price_source: str = "dynamic"  # "fixed" or "dynamic"
     export_price_eur_per_kwh: float = 0.0778
-    export_price_adder_eur_per_kwh: float = 0.0888 #Stromnetz Berlin dokument für 2026 Netzentgelt
+    export_price_adder_eur_per_kwh: float = 0.0997 #Stromnetz Berlin dokument für 2025 Netzentgelt
     export_price_deduction_eur_per_kwh: float = 0.0
 
     # EV
-    ev_cap_kwh: float = 79.5
+    ev_cap_kwh: float = 45
     ev_soc_init: float = 1.0
     ev_soc_min: float = 0.3
     ev_eta_ch: float = 1.0
