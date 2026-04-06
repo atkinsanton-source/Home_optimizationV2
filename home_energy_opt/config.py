@@ -6,7 +6,7 @@ SUPPORTED_CHARGING_POINT_NAMES = ("home", "public", "workplace", "fast75", "fast
 
 def _default_ev_cp_charge_power_kw() -> Dict[str, float]:
     return {
-        "home": 11.0,
+        "home": 22.0,
         "public": 22.0,
         "workplace": 11.0,
         "fast75": 75.0,
@@ -64,19 +64,19 @@ class EnergySystemConfig:
 
     # Grid
     p_grid_max_kw: float = 44.0
-    import_price_adder_eur_per_kwh: float = 0.1944 #Von Octopus Energy
-    import_price_adder_pct: float = 0.19  #Mehrwertsteuer 19%
+    import_price_adder_eur_per_kwh: float = 0.1944 # Von Octopus Energy
+    import_price_adder_pct: float = 0.19  # Mehrwertsteuer 19%
     import_price_deduction_eur_per_kwh: float = 0.0
     baseline_static_import_price_eur_per_kwh: float = 0.3627
 
     # Export remuneration
     export_price_source: str = "dynamic"  # "fixed" or "dynamic"
     export_price_eur_per_kwh: float = 0.0778
-    export_price_adder_eur_per_kwh: float = 0.0997 #Stromnetz Berlin dokument für 2025 Netzentgelt
+    export_price_adder_eur_per_kwh: float = 0.0997 +0.0244 #Stromnetz Berlin dokument für 2025 Netzentgelt + Stromsteuer
     export_price_deduction_eur_per_kwh: float = 0.0
 
     # EV
-    ev_cap_kwh: float = 45
+    ev_cap_kwh: float = 79.5
     ev_soc_init: float = 1.0
     ev_soc_min: float = 0.3
     ev_eta_ch: float = 1.0
