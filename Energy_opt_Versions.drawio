@@ -1,6 +1,6 @@
 <mxfile host="65bd71144e" pages="3">
     <diagram name="V1" id="CCELYaMFE5GgUeG4S3V_">
-        <mxGraphModel dx="1058" dy="694" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="827" pageHeight="1169" math="0" shadow="0">
+        <mxGraphModel dx="1527" dy="930" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="827" pageHeight="1169" math="0" shadow="0">
             <root>
                 <mxCell id="0"/>
                 <mxCell id="1" parent="0"/>
@@ -122,7 +122,7 @@
         </mxGraphModel>
     </diagram>
     <diagram id="CLBFxf7q9l6KuiY7NSFs" name="V2">
-        <mxGraphModel dx="1128" dy="740" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="827" pageHeight="1169" math="0" shadow="0">
+        <mxGraphModel dx="1527" dy="930" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="827" pageHeight="1169" math="0" shadow="0">
             <root>
                 <mxCell id="0"/>
                 <mxCell id="1" parent="0"/>
@@ -244,7 +244,7 @@
         </mxGraphModel>
     </diagram>
     <diagram id="nO2AtdF0G6XCRT-eT0ht" name="V3">
-        <mxGraphModel dx="1302" dy="854" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="827" pageHeight="1169" math="0" shadow="0">
+        <mxGraphModel dx="1527" dy="930" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="827" pageHeight="1169" math="0" shadow="0">
             <root>
                 <mxCell id="0"/>
                 <mxCell id="1" parent="0"/>
@@ -370,6 +370,161 @@
                         <mxPoint x="400" y="230" as="sourcePoint"/>
                         <mxPoint x="450" y="180" as="targetPoint"/>
                     </mxGeometry>
+                </mxCell>
+            </root>
+        </mxGraphModel>
+    </diagram>
+    <diagram id="aBWPn_aDz6nVSz1vgO-w" name="Page-4">
+        <mxGraphModel dx="1527" dy="930" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="827" pageHeight="1169" math="0" shadow="0">
+            <root>
+                <mxCell id="0"/>
+                <mxCell id="1" parent="0"/>
+                <mxCell id="IVZnAhVQ_zmVKLS_mMZ0-35" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;fontColor=#333333;strokeColor=#666666;" vertex="1" parent="1">
+                    <mxGeometry x="514" y="380.55" width="120" height="60" as="geometry"/>
+                </mxCell>
+                <mxCell id="IVZnAhVQ_zmVKLS_mMZ0-1" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;fontColor=#333333;strokeColor=#666666;" vertex="1" parent="1">
+                    <mxGeometry x="217.75" y="440" width="120" height="60" as="geometry"/>
+                </mxCell>
+                <mxCell id="IVZnAhVQ_zmVKLS_mMZ0-2" value="" style="shape=trapezoid;perimeter=trapezoidPerimeter;whiteSpace=wrap;html=1;fixedSize=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1">
+                    <mxGeometry x="85" y="700" width="120" height="60" as="geometry"/>
+                </mxCell>
+                <mxCell id="IVZnAhVQ_zmVKLS_mMZ0-3" value="Mobility Demand" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0;" vertex="1" parent="1">
+                    <mxGeometry x="120" y="715" width="60" height="30" as="geometry"/>
+                </mxCell>
+                <mxCell id="IVZnAhVQ_zmVKLS_mMZ0-4" value="" style="shape=trapezoid;perimeter=trapezoidPerimeter;whiteSpace=wrap;html=1;fixedSize=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1">
+                    <mxGeometry x="369" y="700" width="120" height="60" as="geometry"/>
+                </mxCell>
+                <mxCell id="IVZnAhVQ_zmVKLS_mMZ0-5" value="House Load" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0;" vertex="1" parent="1">
+                    <mxGeometry x="399" y="715" width="60" height="30" as="geometry"/>
+                </mxCell>
+                <mxCell id="IVZnAhVQ_zmVKLS_mMZ0-6" value="" style="shape=trapezoid;perimeter=trapezoidPerimeter;whiteSpace=wrap;html=1;fixedSize=1;rotation=-180;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="1">
+                    <mxGeometry x="92.75" y="120" width="120" height="60" as="geometry"/>
+                </mxCell>
+                <mxCell id="IVZnAhVQ_zmVKLS_mMZ0-7" value="Electricity Supply outside of home" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0;" vertex="1" parent="1">
+                    <mxGeometry x="127.75" y="135" width="60" height="30" as="geometry"/>
+                </mxCell>
+                <mxCell id="IVZnAhVQ_zmVKLS_mMZ0-8" value="" style="shape=trapezoid;perimeter=trapezoidPerimeter;whiteSpace=wrap;html=1;fixedSize=1;rotation=-180;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="1">
+                    <mxGeometry x="355.25" y="120" width="120" height="60" as="geometry"/>
+                </mxCell>
+                <mxCell id="IVZnAhVQ_zmVKLS_mMZ0-9" value="Grid Supply at home" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0;" vertex="1" parent="1">
+                    <mxGeometry x="385.25" y="135" width="60" height="30" as="geometry"/>
+                </mxCell>
+                <mxCell id="IVZnAhVQ_zmVKLS_mMZ0-10" value="" style="ellipse;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;" vertex="1" parent="1">
+                    <mxGeometry x="67.75" y="250" width="170" height="80" as="geometry"/>
+                </mxCell>
+                <mxCell id="IVZnAhVQ_zmVKLS_mMZ0-11" value="External electricity" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0;" vertex="1" parent="1">
+                    <mxGeometry x="112.75" y="275" width="75" height="30" as="geometry"/>
+                </mxCell>
+                <mxCell id="IVZnAhVQ_zmVKLS_mMZ0-12" value="" style="ellipse;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;" vertex="1" parent="1">
+                    <mxGeometry x="330.25" y="240" width="170" height="80" as="geometry"/>
+                </mxCell>
+                <mxCell id="IVZnAhVQ_zmVKLS_mMZ0-13" value="Home Electricity" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0;" vertex="1" parent="1">
+                    <mxGeometry x="382.75" y="265" width="65" height="30" as="geometry"/>
+                </mxCell>
+                <mxCell id="IVZnAhVQ_zmVKLS_mMZ0-14" value="EV Battery" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0;" vertex="1" parent="1">
+                    <mxGeometry x="247.75" y="455" width="60" height="30" as="geometry"/>
+                </mxCell>
+                <mxCell id="IVZnAhVQ_zmVKLS_mMZ0-15" value="" style="ellipse;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;" vertex="1" parent="1">
+                    <mxGeometry x="60" y="550" width="170" height="80" as="geometry"/>
+                </mxCell>
+                <mxCell id="IVZnAhVQ_zmVKLS_mMZ0-16" value="Electricity consumption of EV" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0;" vertex="1" parent="1">
+                    <mxGeometry x="107.5" y="575" width="75" height="30" as="geometry"/>
+                </mxCell>
+                <mxCell id="IVZnAhVQ_zmVKLS_mMZ0-17" value="" style="endArrow=classic;html=1;rounded=0;" edge="1" source="IVZnAhVQ_zmVKLS_mMZ0-6" target="IVZnAhVQ_zmVKLS_mMZ0-10" parent="1">
+                    <mxGeometry width="50" height="50" relative="1" as="geometry">
+                        <mxPoint x="152.25" y="190" as="sourcePoint"/>
+                        <mxPoint x="152.5" y="245" as="targetPoint"/>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="IVZnAhVQ_zmVKLS_mMZ0-18" value="" style="endArrow=classic;html=1;rounded=0;" edge="1" source="IVZnAhVQ_zmVKLS_mMZ0-8" target="IVZnAhVQ_zmVKLS_mMZ0-12" parent="1">
+                    <mxGeometry width="50" height="50" relative="1" as="geometry">
+                        <mxPoint x="410.25" y="180" as="sourcePoint"/>
+                        <mxPoint x="410.5" y="235" as="targetPoint"/>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="IVZnAhVQ_zmVKLS_mMZ0-19" value="" style="endArrow=classic;html=1;rounded=0;entryX=0.358;entryY=0.067;entryDx=0;entryDy=0;entryPerimeter=0;" edge="1" source="IVZnAhVQ_zmVKLS_mMZ0-12" target="IVZnAhVQ_zmVKLS_mMZ0-4" parent="1">
+                    <mxGeometry width="50" height="50" relative="1" as="geometry">
+                        <mxPoint x="412.25" y="420" as="sourcePoint"/>
+                        <mxPoint x="412.25" y="690" as="targetPoint"/>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="IVZnAhVQ_zmVKLS_mMZ0-20" value="" style="endArrow=classic;html=1;rounded=0;" edge="1" source="IVZnAhVQ_zmVKLS_mMZ0-1" parent="1">
+                    <mxGeometry width="50" height="50" relative="1" as="geometry">
+                        <mxPoint x="230" y="510" as="sourcePoint"/>
+                        <mxPoint x="202.25" y="560" as="targetPoint"/>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="IVZnAhVQ_zmVKLS_mMZ0-21" value="" style="endArrow=classic;html=1;rounded=0;" edge="1" source="IVZnAhVQ_zmVKLS_mMZ0-15" target="IVZnAhVQ_zmVKLS_mMZ0-2" parent="1">
+                    <mxGeometry width="50" height="50" relative="1" as="geometry">
+                        <mxPoint x="144.5" y="640" as="sourcePoint"/>
+                        <mxPoint x="144.75" y="695" as="targetPoint"/>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="IVZnAhVQ_zmVKLS_mMZ0-22" value="" style="rhombus;whiteSpace=wrap;html=1;rotation=25;" vertex="1" parent="1">
+                    <mxGeometry x="299.54999999999995" y="331.63" width="85.55" height="70.23" as="geometry"/>
+                </mxCell>
+                <mxCell id="IVZnAhVQ_zmVKLS_mMZ0-23" value="If ev at home" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0;rotation=30;" vertex="1" parent="1">
+                    <mxGeometry x="312.33000000000004" y="351.75" width="60" height="30" as="geometry"/>
+                </mxCell>
+                <mxCell id="IVZnAhVQ_zmVKLS_mMZ0-24" value="" style="endArrow=classic;html=1;rounded=0;exitX=0.76;exitY=0.9;exitDx=0;exitDy=0;exitPerimeter=0;" edge="1" source="IVZnAhVQ_zmVKLS_mMZ0-10" target="IVZnAhVQ_zmVKLS_mMZ0-25" parent="1">
+                    <mxGeometry width="50" height="50" relative="1" as="geometry">
+                        <mxPoint x="240" y="490" as="sourcePoint"/>
+                        <mxPoint x="220" y="370" as="targetPoint"/>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="IVZnAhVQ_zmVKLS_mMZ0-25" value="" style="rhombus;whiteSpace=wrap;html=1;rotation=-30;" vertex="1" parent="1">
+                    <mxGeometry x="174.11" y="343.4200000000001" width="92.37" height="71.61" as="geometry"/>
+                </mxCell>
+                <mxCell id="IVZnAhVQ_zmVKLS_mMZ0-26" value="If ev connected externally" style="text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0;rotation=-30;" vertex="1" parent="1">
+                    <mxGeometry x="209.10000000000002" y="377.9000000000001" width="20.9" height="2.65" as="geometry"/>
+                </mxCell>
+                <mxCell id="IVZnAhVQ_zmVKLS_mMZ0-27" value="" style="endArrow=classic;html=1;rounded=0;exitX=0.5;exitY=1;exitDx=0;exitDy=0;" edge="1" source="IVZnAhVQ_zmVKLS_mMZ0-25" target="IVZnAhVQ_zmVKLS_mMZ0-1" parent="1">
+                    <mxGeometry width="50" height="50" relative="1" as="geometry">
+                        <mxPoint x="260" y="420" as="sourcePoint"/>
+                        <mxPoint x="271" y="447" as="targetPoint"/>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="IVZnAhVQ_zmVKLS_mMZ0-28" value="" style="endArrow=classic;html=1;rounded=0;" edge="1" source="IVZnAhVQ_zmVKLS_mMZ0-12" target="IVZnAhVQ_zmVKLS_mMZ0-8" parent="1">
+                    <mxGeometry width="50" height="50" relative="1" as="geometry">
+                        <Array as="points">
+                            <mxPoint x="415" y="210"/>
+                        </Array>
+                        <mxPoint x="450.25" y="230" as="sourcePoint"/>
+                        <mxPoint x="500.25" y="180" as="targetPoint"/>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="IVZnAhVQ_zmVKLS_mMZ0-29" value="" style="endArrow=classic;startArrow=classic;html=1;rounded=0;" edge="1" source="IVZnAhVQ_zmVKLS_mMZ0-1" target="IVZnAhVQ_zmVKLS_mMZ0-22" parent="1">
+                    <mxGeometry width="50" height="50" relative="1" as="geometry">
+                        <mxPoint x="299.54999999999995" y="440" as="sourcePoint"/>
+                        <mxPoint x="349.54999999999995" y="390" as="targetPoint"/>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="IVZnAhVQ_zmVKLS_mMZ0-30" value="" style="endArrow=classic;startArrow=classic;html=1;rounded=0;" edge="1" source="IVZnAhVQ_zmVKLS_mMZ0-22" target="IVZnAhVQ_zmVKLS_mMZ0-12" parent="1">
+                    <mxGeometry width="50" height="50" relative="1" as="geometry">
+                        <mxPoint x="280" y="300" as="sourcePoint"/>
+                        <mxPoint x="330" y="250" as="targetPoint"/>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="IVZnAhVQ_zmVKLS_mMZ0-31" value="" style="endArrow=classic;startArrow=classic;html=1;" edge="1" parent="1" source="IVZnAhVQ_zmVKLS_mMZ0-12" target="IVZnAhVQ_zmVKLS_mMZ0-35">
+                    <mxGeometry width="50" height="50" relative="1" as="geometry">
+                        <mxPoint x="520" y="380" as="sourcePoint"/>
+                        <mxPoint x="532.9933251987541" y="379.9626512774164" as="targetPoint"/>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="IVZnAhVQ_zmVKLS_mMZ0-34" value="Stationary Battery" style="text;html=1;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;" vertex="1" parent="1">
+                    <mxGeometry x="544" y="395.55" width="60" height="30" as="geometry"/>
+                </mxCell>
+                <mxCell id="IVZnAhVQ_zmVKLS_mMZ0-37" value="" style="shape=trapezoid;perimeter=trapezoidPerimeter;whiteSpace=wrap;html=1;fixedSize=1;rotation=-180;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="1">
+                    <mxGeometry x="604" y="190" width="120" height="60" as="geometry"/>
+                </mxCell>
+                <mxCell id="IVZnAhVQ_zmVKLS_mMZ0-39" value="" style="endArrow=classic;html=1;" edge="1" parent="1" source="IVZnAhVQ_zmVKLS_mMZ0-37" target="IVZnAhVQ_zmVKLS_mMZ0-12">
+                    <mxGeometry width="50" height="50" relative="1" as="geometry">
+                        <mxPoint x="390" y="520" as="sourcePoint"/>
+                        <mxPoint x="440" y="470" as="targetPoint"/>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="IVZnAhVQ_zmVKLS_mMZ0-40" value="PV System" style="text;html=1;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;" vertex="1" parent="1">
+                    <mxGeometry x="634" y="205" width="60" height="30" as="geometry"/>
                 </mxCell>
             </root>
         </mxGraphModel>
