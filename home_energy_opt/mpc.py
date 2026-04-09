@@ -670,6 +670,8 @@ def run_mpc_loop(
     out = pd.DataFrame(rows, index=df.index)
     out["grid_import_kwh"] = out["grid_import_kw"] * cfg.dt_hours
     out["grid_export_kwh"] = out["grid_export_kw"] * cfg.dt_hours
+    out["home_load_kw"] = df["load_kw"]
+    out["home_load_kwh"] = out["home_load_kw"] * cfg.dt_hours
     out["ev_home_ch_kwh"] = out["ev_home_ch_kw"] * cfg.dt_hours
     out["ev_ext_ch_kwh"] = out["ev_ext_ch_kw"] * cfg.dt_hours
     out["ev_dis_to_home_kwh"] = out["ev_dis_to_home_kw"] * cfg.dt_hours
@@ -678,6 +680,10 @@ def run_mpc_loop(
     out["ev_battery_degradation_cost_eur"] = (
         float(cfg.ev_degradation_eur_per_kwh_charged) * (out["ev_home_ch_kwh"] + out["ev_ext_ch_kwh"])
     )
+    out["home_load_grid_import_kwh"] = out[["grid_import_kwh", "home_load_kwh"]].min(axis=1)
+    out["ev_home_charge_cost_eur"] = df["import_price_eur_per_kwh"] * out["ev_home_ch_kwh"]
+    out["home_load_cost_eur"] = df["import_price_eur_per_kwh"] * out["home_load_grid_import_kwh"]
+    out["ev_discharge_grid_revenue_eur"] = df["ev_export_price_eur_per_kwh"] * out["ev_dis_to_grid_kwh"]
     out["step_cost_eur"] = (
         df["import_price_eur_per_kwh"] * out["grid_import_kwh"]
         - df["ev_export_price_eur_per_kwh"] * out["grid_export_kwh"]

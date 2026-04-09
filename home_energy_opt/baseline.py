@@ -113,6 +113,8 @@ class BaselineHeuristic(ABC):
         # Add per-step energies and monetary cost for metric aggregation.
         result["grid_import_kwh"] = result["grid_import_kw"] * cfg.dt_hours
         result["grid_export_kwh"] = result["grid_export_kw"] * cfg.dt_hours
+        result["home_load_kw"] = df["load_kw"]
+        result["home_load_kwh"] = result["home_load_kw"] * cfg.dt_hours
         result["ev_home_ch_kwh"] = result["ev_home_ch_kw"] * cfg.dt_hours
         result["ev_ext_ch_kwh"] = result["ev_ext_ch_kw"] * cfg.dt_hours
         result["ev_dis_to_home_kwh"] = result["ev_dis_to_home_kw"] * cfg.dt_hours
@@ -122,6 +124,10 @@ class BaselineHeuristic(ABC):
         )
         home_import_price = self._home_import_price_series(df, cfg)
         result["home_grid_price_total_eur_per_kwh"] = home_import_price
+        result["home_load_grid_import_kwh"] = result[["grid_import_kwh", "home_load_kwh"]].min(axis=1)
+        result["ev_home_charge_cost_eur"] = home_import_price * result["ev_home_ch_kwh"]
+        result["home_load_cost_eur"] = home_import_price * result["home_load_grid_import_kwh"]
+        result["ev_discharge_grid_revenue_eur"] = df["ev_export_price_eur_per_kwh"] * result["ev_dis_to_grid_kwh"]
         result["step_cost_eur"] = (
             home_import_price * result["grid_import_kwh"]
             - df["ev_export_price_eur_per_kwh"] * result["grid_export_kwh"]
