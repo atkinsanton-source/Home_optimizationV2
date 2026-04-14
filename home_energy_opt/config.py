@@ -6,7 +6,7 @@ SUPPORTED_CHARGING_POINT_NAMES = ("home", "public", "workplace", "fast75", "fast
 
 def _default_ev_cp_charge_power_kw() -> Dict[str, float]:
     return {
-        "home": 22.0,
+        "home": 11.0,
         "public": 22.0,
         "workplace": 11.0,
         "fast75": 75.0,
@@ -68,6 +68,7 @@ class EnergySystemConfig:
     import_price_adder_pct: float = 0.19  # Mehrwertsteuer 19%
     import_price_deduction_eur_per_kwh: float = 0.0
     baseline_static_import_price_eur_per_kwh: float = 0.3627
+    static_mpc_import_price_eur_per_kwh: float = 0.3627
 
     # Export remuneration
     export_price_source: str = "dynamic"  # "fixed" or "dynamic"
@@ -79,7 +80,7 @@ class EnergySystemConfig:
     ev_cap_kwh: float = 79.5
     ev_soc_init: float = 1.0
     ev_soc_min: float = 0.3
-    ev_eta_ch: float = 1.0
+    ev_eta_ch: float = 0.9
     ev_eta_dis: float = 0.90
 
     # Charging-point specific limits and prices
@@ -114,7 +115,7 @@ class EnergySystemConfig:
     # Extension hooks
     enable_battery_degradation_cost: bool = False
     battery_degradation_eur_per_kwh: float = 0.0
-    ev_degradation_eur_per_kwh_charged: float = 0.067/2.0
+    ev_degradation_eur_per_kwh_charged: float = 0.067
 
     def __post_init__(self) -> None:
         if self.apply_version_preset:

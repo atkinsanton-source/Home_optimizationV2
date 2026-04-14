@@ -19,6 +19,16 @@ def summarize_metrics(inp: pd.DataFrame, sim: pd.DataFrame, cfg: EnergySystemCon
             return 0.0
         return float(pd.to_numeric(df[col], errors="coerce").fillna(0.0).max())
 
+    def _first_col(df: pd.DataFrame, col: str) -> float:
+        if col not in df.columns or len(df) == 0:
+            return 0.0
+        return float(pd.to_numeric(df[col], errors="coerce").fillna(0.0).iloc[0])
+
+    def _last_col(df: pd.DataFrame, col: str) -> float:
+        if col not in df.columns or len(df) == 0:
+            return 0.0
+        return float(pd.to_numeric(df[col], errors="coerce").fillna(0.0).iloc[-1])
+
     def _sum_abs_col(df: pd.DataFrame, col: str, eps: float = 0.0) -> float:
         if col not in df.columns:
             return 0.0
@@ -36,6 +46,10 @@ def summarize_metrics(inp: pd.DataFrame, sim: pd.DataFrame, cfg: EnergySystemCon
         "total_system_cost_eur": float(sim["step_cost_eur"].sum()),
         "grid_import_kwh": float(sim["grid_import_kwh"].sum()),
         "grid_export_kwh": float(sim["grid_export_kwh"].sum()),
+        "ev_consumption_kwh": _sum_col(inp, "ev_drive_kwh"),
+        "home_load_kwh": _sum_col(sim, "home_load_kwh"),
+        "ev_initial_energy_kwh": _first_col(sim, "ev_energy_kwh"),
+        "ev_final_energy_kwh": _last_col(sim, "ev_energy_kwh"),
         "external_charge_kwh": _sum_col(sim, "ev_ext_ch_kwh"),
         "external_charge_cost_eur": _sum_col(sim, "ext_charge_cost_eur"),
         "ev_battery_degradation_cost_eur": _sum_col(sim, "ev_battery_degradation_cost_eur"),

@@ -77,6 +77,41 @@ def _mask_windows(mask: pd.Series) -> List[tuple[pd.Timestamp, pd.Timestamp, int
     return out
 
 
+def _adaptive_reserve_sanity_check(
+    baseline_soc_kwh,
+    mpc_result,
+    fixed_reserve_kwh: float,
+    label: str,
+):
+    import pandas as pd
+
+    sanity_eps = 1e-6
+    mpc_soc_kwh = pd.to_numeric(mpc_result["ev_energy_kwh"], errors="coerce").reindex(baseline_soc_kwh.index).fillna(0.0)
+    sanity_mask = baseline_soc_kwh < fixed_reserve_kwh
+    sanity_deficit_kwh = baseline_soc_kwh - mpc_soc_kwh
+    sanity_violation_mask = sanity_mask & (sanity_deficit_kwh > sanity_eps)
+    sanity_violation_steps = int(sanity_violation_mask.sum())
+    sanity_max_deficit_kwh = float(sanity_deficit_kwh.loc[sanity_violation_mask].max()) if sanity_violation_steps > 0 else 0.0
+    print(
+        f"[sanity] {label} adaptive-reserve check: "
+        f"masked_steps={int(sanity_mask.sum())}, "
+        f"violations={sanity_violation_steps}, "
+        f"max_deficit_kwh={sanity_max_deficit_kwh:.6f}",
+        flush=True,
+    )
+    sanity_violations_df = pd.DataFrame(
+        {
+            "baseline_soc_kwh": baseline_soc_kwh,
+            "mpc_soc_kwh": mpc_soc_kwh,
+            "fixed_reserve_kwh": fixed_reserve_kwh,
+            "deficit_kwh": sanity_deficit_kwh,
+        },
+        index=baseline_soc_kwh.index,
+    ).loc[sanity_violation_mask]
+    sanity_violations_df.index.name = "timestamp"
+    return sanity_violations_df, sanity_violation_steps, sanity_max_deficit_kwh
+
+
 def main() -> None:
     """Run the full workflow: load data, simulate, compare, and export artifacts."""
     t0 = perf_counter()
@@ -101,6 +136,16 @@ def main() -> None:
     )
     if args.use_mip_start is not None:
         cfg.use_mip_start = args.use_mip_start
+    cfg_mpc_static = EnergySystemConfig(
+        system_version=1,
+        horizon_steps=args.horizon,
+        gurobi_mipgap=args.mipgap,
+        gurobi_threads=args.threads,
+        gurobi_mipfocus=args.mipfocus,
+    )
+    cfg_mpc_static.static_mpc_import_price_eur_per_kwh = cfg.static_mpc_import_price_eur_per_kwh
+    if args.use_mip_start is not None:
+        cfg_mpc_static.use_mip_start = args.use_mip_start
 
     # 1) Load and validate the raw input file.
     t_stage = perf_counter()
@@ -112,6 +157,11 @@ def main() -> None:
     t_stage = perf_counter()
     _stage("Preprocessing data")
     data = preprocess(raw, cfg).iloc[: args.steps].copy()
+    data_mpc_static = preprocess(raw, cfg_mpc_static).iloc[: args.steps].copy()
+    static_mpc_price = float(cfg_mpc_static.static_mpc_import_price_eur_per_kwh)
+    data_mpc_static["import_price_eur_per_kwh"] = static_mpc_price
+    data_mpc_static["ev_home_import_price_eur_per_kwh"] = static_mpc_price
+    data_mpc_static["ev_export_price_eur_per_kwh"] = 0.0
     print(f"[stage] Preprocessing data done in {perf_counter() - t_stage:.2f}s", flush=True)
 
     # 3) Run both rule-based baseline variants (dynamic/static home import tariff).
@@ -130,6 +180,7 @@ def main() -> None:
     adaptive_reserve_kwh.loc[baseline_below_fixed_mask] = baseline_soc_kwh.loc[baseline_below_fixed_mask]
     adaptive_reserve_kwh = adaptive_reserve_kwh.clip(lower=0.0, upper=cfg.ev_cap_kwh)
     data_mpc["ev_reserve_kwh"] = adaptive_reserve_kwh
+    data_mpc_static["ev_reserve_kwh"] = adaptive_reserve_kwh.reindex(data_mpc_static.index).astype(float)
     # Export adaptive reserve profile for both baseline and MPC result tables.
     baseline_dynamic["ev_reserve_kwh"] = adaptive_reserve_kwh.reindex(baseline_dynamic.index).astype(float)
     baseline_static["ev_reserve_kwh"] = adaptive_reserve_kwh.reindex(baseline_static.index).astype(float)
@@ -154,31 +205,36 @@ def main() -> None:
     )
     print(f"[stage] Running MPC loop done in {perf_counter() - t_stage:.2f}s", flush=True)
 
-    # Sanity check: when baseline SOC is below fixed reserve, MPC SOC must not drop below baseline SOC.
-    sanity_eps = 1e-6
-    mpc_soc_kwh = pd.to_numeric(mpc["ev_energy_kwh"], errors="coerce").reindex(data_mpc.index).fillna(0.0)
-    sanity_mask = baseline_soc_kwh < fixed_reserve_kwh
-    sanity_deficit_kwh = baseline_soc_kwh - mpc_soc_kwh
-    sanity_violation_mask = sanity_mask & (sanity_deficit_kwh > sanity_eps)
-    sanity_violation_steps = int(sanity_violation_mask.sum())
-    sanity_max_deficit_kwh = float(sanity_deficit_kwh.loc[sanity_violation_mask].max()) if sanity_violation_steps > 0 else 0.0
-    print(
-        "[sanity] adaptive-reserve check: "
-        f"masked_steps={int(sanity_mask.sum())}, "
-        f"violations={sanity_violation_steps}, "
-        f"max_deficit_kwh={sanity_max_deficit_kwh:.6f}",
-        flush=True,
+    t_stage = perf_counter()
+    _stage("Running static MPC loop")
+    mpc_static, logs_static = run_mpc_loop(
+        data_mpc_static,
+        cfg_mpc_static,
+        progress_every=args.progress_every,
+        slow_step_sec=args.slow_step_sec,
+        solver_tee=args.solver_tee,
+        use_persistent_gurobi=not args.legacy_gurobi_rebuild,
+        use_mip_start=args.use_mip_start,
     )
-    sanity_violations_df = pd.DataFrame(
-        {
-            "baseline_soc_kwh": baseline_soc_kwh,
-            "mpc_soc_kwh": mpc_soc_kwh,
-            "fixed_reserve_kwh": fixed_reserve_kwh,
-            "deficit_kwh": sanity_deficit_kwh,
-        },
-        index=data_mpc.index,
-    ).loc[sanity_violation_mask]
-    sanity_violations_df.index.name = "timestamp"
+    print(f"[stage] Running static MPC loop done in {perf_counter() - t_stage:.2f}s", flush=True)
+
+    # Sanity check: when baseline SOC is below fixed reserve, MPC SOC must not drop below baseline SOC.
+    sanity_violations_df, sanity_violation_steps, sanity_max_deficit_kwh = _adaptive_reserve_sanity_check(
+        baseline_soc_kwh,
+        mpc,
+        fixed_reserve_kwh,
+        "mpc",
+    )
+    (
+        sanity_violations_static_df,
+        sanity_violation_static_steps,
+        sanity_max_deficit_static_kwh,
+    ) = _adaptive_reserve_sanity_check(
+        baseline_soc_kwh,
+        mpc_static,
+        fixed_reserve_kwh,
+        "mpc_static",
+    )
 
     # 6) Persist raw simulation outputs so they can be inspected later.
     t_stage = perf_counter()
@@ -191,8 +247,11 @@ def main() -> None:
     baseline_dynamic.to_csv(outdir / "baseline_dynamic_results.csv")
     baseline_static.to_csv(outdir / "baseline_static_results.csv")
     mpc.to_csv(outdir / "mpc_results.csv")
+    mpc_static.to_csv(outdir / "mpc_static_results.csv")
     pd.DataFrame(logs).to_csv(outdir / "mpc_solver_logs.csv", index=False)
+    pd.DataFrame(logs_static).to_csv(outdir / "mpc_static_solver_logs.csv", index=False)
     sanity_violations_df.to_csv(outdir / "mpc_baseline_reserve_sanity_violations.csv")
+    sanity_violations_static_df.to_csv(outdir / "mpc_static_baseline_reserve_sanity_violations.csv")
 
     # Detect simultaneous opposite flows from the already-solved MPC trajectory.
     grid_mask = _overlap_mask(mpc["grid_import_kw"], mpc["grid_export_kw"])
@@ -224,6 +283,7 @@ def main() -> None:
     metrics_baseline_dynamic = summarize_metrics(data, baseline_dynamic, cfg)
     metrics_baseline_static = summarize_metrics(data, baseline_static, cfg)
     metrics_mpc = summarize_metrics(data_mpc, mpc, cfg)
+    metrics_mpc_static = summarize_metrics(data_mpc_static, mpc_static, cfg_mpc_static)
     sanity_count_key = "mpc_baseline_reserve_sanity_violation_steps"
     sanity_max_deficit_key = "mpc_baseline_reserve_sanity_max_deficit_kwh"
     metrics_baseline_dynamic[sanity_count_key] = 0.0
@@ -232,9 +292,11 @@ def main() -> None:
     metrics_baseline_static[sanity_max_deficit_key] = 0.0
     metrics_mpc[sanity_count_key] = float(sanity_violation_steps)
     metrics_mpc[sanity_max_deficit_key] = sanity_max_deficit_kwh
+    metrics_mpc_static[sanity_count_key] = float(sanity_violation_static_steps)
+    metrics_mpc_static[sanity_max_deficit_key] = sanity_max_deficit_static_kwh
     metrics = pd.DataFrame(
-        [metrics_baseline_dynamic, metrics_baseline_static, metrics_mpc],
-        index=["baseline_dynamic", "baseline_static", "mpc"],
+        [metrics_baseline_static, metrics_baseline_dynamic, metrics_mpc_static, metrics_mpc],
+        index=["baseline_static", "baseline_dynamic", "mpc_static", "mpc"],
     )
     metrics.to_csv(outdir / "metrics_comparison.csv")
     print(f"[stage] Computing metrics done in {perf_counter() - t_stage:.2f}s", flush=True)
@@ -256,10 +318,12 @@ def main() -> None:
     print("[stage] Interactive HTML export ready", flush=True)
     print(f"[stage] Generating plots done in {perf_counter() - t_stage:.2f}s", flush=True)
 
-    print("Baseline dynamic metrics:")
-    print(metrics.loc["baseline_dynamic"])
-    print("\nBaseline static metrics:")
+    print("Baseline static metrics:")
     print(metrics.loc["baseline_static"])
+    print("\nBaseline dynamic metrics:")
+    print(metrics.loc["baseline_dynamic"])
+    print("\nStatic MPC metrics:")
+    print(metrics.loc["mpc_static"])
     print("\nMPC metrics:")
     print(metrics.loc["mpc"])
     print("\nSimultaneous opposite-flow counts (MPC run):")
