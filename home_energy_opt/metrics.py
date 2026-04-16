@@ -5,6 +5,7 @@ import pandas as pd
 from home_energy_opt.config import EnergySystemConfig
 
 EV_SOC_CLAMP_EPS_KWH = 1e-5
+EXTERNAL_CHARGING_POINTS = ("public", "workplace", "fast75", "fast150")
 
 
 def summarize_metrics(inp: pd.DataFrame, sim: pd.DataFrame, cfg: EnergySystemConfig) -> dict:
@@ -37,11 +38,18 @@ def summarize_metrics(inp: pd.DataFrame, sim: pd.DataFrame, cfg: EnergySystemCon
             vals = vals.where(vals > eps, 0.0)
         return float(vals.sum())
 
+    def _sum_by_charging_point(df: pd.DataFrame, value_col: str, charging_point: str) -> float:
+        if "charging_point_effective" not in df.columns or value_col not in df.columns:
+            return 0.0
+        charging_points = df["charging_point_effective"].astype("string").str.strip().str.lower()
+        values = pd.to_numeric(df[value_col], errors="coerce").fillna(0.0)
+        return float(values[charging_points == charging_point].sum())
+
     pv_energy = (inp["pv_ac_kw"] * cfg.dt_hours).sum()
     pv_export = sim["grid_export_kwh"].sum()
     pv_self_consumed = max(0.0, pv_energy - pv_export)
 
-    return {
+    metrics = {
         "total_cost_eur": float(sim["step_cost_eur"].sum()),
         "total_system_cost_eur": float(sim["step_cost_eur"].sum()),
         "grid_import_kwh": float(sim["grid_import_kwh"].sum()),
@@ -80,3 +88,9 @@ def summarize_metrics(inp: pd.DataFrame, sim: pd.DataFrame, cfg: EnergySystemCon
             ((sim["ev_energy_kwh"] < cfg.ev_soc_min * cfg.ev_cap_kwh) | (sim["ev_energy_kwh"] > cfg.ev_cap_kwh)).sum()
         ),
     }
+
+    for charging_point in EXTERNAL_CHARGING_POINTS:
+        metrics[f"external_charge_{charging_point}_kwh"] = _sum_by_charging_point(sim, "ev_ext_ch_kwh", charging_point)
+        metrics[f"external_charge_{charging_point}_cost_eur"] = _sum_by_charging_point(sim, "ext_charge_cost_eur", charging_point)
+
+    return metrics
