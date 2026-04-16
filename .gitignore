@@ -15,6 +15,7 @@
 !data/**/*.csv
 
 # Track selected utility scripts (source only)
+!scripts/
 !scripts/electricity_price_plot.py
 !scripts/regression_persistent_mpc.py
 !scripts/plot_dashboard_from_outputs.py
