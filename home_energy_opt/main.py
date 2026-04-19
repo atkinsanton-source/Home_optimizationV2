@@ -136,15 +136,26 @@ def main() -> None:
     )
     if args.use_mip_start is not None:
         cfg.use_mip_start = args.use_mip_start
+    comparison_apply_steps = max(1, int(round(3.0 / cfg.dt_hours)))
+    cfg_mpc_dynamic_v1 = EnergySystemConfig(
+        system_version=1,
+        horizon_steps=args.horizon,
+        gurobi_mipgap=args.mipgap,
+        gurobi_threads=args.threads,
+        gurobi_mipfocus=args.mipfocus,
+        mpc_apply_steps=comparison_apply_steps,
+    )
     cfg_mpc_static = EnergySystemConfig(
         system_version=1,
         horizon_steps=args.horizon,
         gurobi_mipgap=args.mipgap,
         gurobi_threads=args.threads,
         gurobi_mipfocus=args.mipfocus,
+        mpc_apply_steps=comparison_apply_steps,
     )
     cfg_mpc_static.static_mpc_import_price_eur_per_kwh = cfg.static_mpc_import_price_eur_per_kwh
     if args.use_mip_start is not None:
+        cfg_mpc_dynamic_v1.use_mip_start = args.use_mip_start
         cfg_mpc_static.use_mip_start = args.use_mip_start
 
     # 1) Load and validate the raw input file.
@@ -157,6 +168,7 @@ def main() -> None:
     t_stage = perf_counter()
     _stage("Preprocessing data")
     data = preprocess(raw, cfg).iloc[: args.steps].copy()
+    data_mpc_dynamic_v1 = preprocess(raw, cfg_mpc_dynamic_v1).iloc[: args.steps].copy()
     data_mpc_static = preprocess(raw, cfg_mpc_static).iloc[: args.steps].copy()
     static_mpc_price = float(cfg_mpc_static.static_mpc_import_price_eur_per_kwh)
     data_mpc_static["import_price_eur_per_kwh"] = static_mpc_price
@@ -180,6 +192,7 @@ def main() -> None:
     adaptive_reserve_kwh.loc[baseline_below_fixed_mask] = baseline_soc_kwh.loc[baseline_below_fixed_mask]
     adaptive_reserve_kwh = adaptive_reserve_kwh.clip(lower=0.0, upper=cfg.ev_cap_kwh)
     data_mpc["ev_reserve_kwh"] = adaptive_reserve_kwh
+    data_mpc_dynamic_v1["ev_reserve_kwh"] = adaptive_reserve_kwh.reindex(data_mpc_dynamic_v1.index).astype(float)
     data_mpc_static["ev_reserve_kwh"] = adaptive_reserve_kwh.reindex(data_mpc_static.index).astype(float)
     # Export adaptive reserve profile for both baseline and MPC result tables.
     baseline_dynamic["ev_reserve_kwh"] = adaptive_reserve_kwh.reindex(baseline_dynamic.index).astype(float)
@@ -206,6 +219,19 @@ def main() -> None:
     print(f"[stage] Running MPC loop done in {perf_counter() - t_stage:.2f}s", flush=True)
 
     t_stage = perf_counter()
+    _stage("Running dynamic V1 MPC loop")
+    mpc_dynamic_v1, logs_dynamic_v1 = run_mpc_loop(
+        data_mpc_dynamic_v1,
+        cfg_mpc_dynamic_v1,
+        progress_every=args.progress_every,
+        slow_step_sec=args.slow_step_sec,
+        solver_tee=args.solver_tee,
+        use_persistent_gurobi=not args.legacy_gurobi_rebuild,
+        use_mip_start=args.use_mip_start,
+    )
+    print(f"[stage] Running dynamic V1 MPC loop done in {perf_counter() - t_stage:.2f}s", flush=True)
+
+    t_stage = perf_counter()
     _stage("Running static MPC loop")
     mpc_static, logs_static = run_mpc_loop(
         data_mpc_static,
@@ -224,6 +250,16 @@ def main() -> None:
         mpc,
         fixed_reserve_kwh,
         "mpc",
+    )
+    (
+        sanity_violations_dynamic_v1_df,
+        sanity_violation_dynamic_v1_steps,
+        sanity_max_deficit_dynamic_v1_kwh,
+    ) = _adaptive_reserve_sanity_check(
+        baseline_soc_kwh,
+        mpc_dynamic_v1,
+        fixed_reserve_kwh,
+        "mpc_dynamic_v1",
     )
     (
         sanity_violations_static_df,
@@ -247,10 +283,13 @@ def main() -> None:
     baseline_dynamic.to_csv(outdir / "baseline_dynamic_results.csv")
     baseline_static.to_csv(outdir / "baseline_static_results.csv")
     mpc.to_csv(outdir / "mpc_results.csv")
+    mpc_dynamic_v1.to_csv(outdir / "mpc_dynamic_v1_results.csv")
     mpc_static.to_csv(outdir / "mpc_static_results.csv")
     pd.DataFrame(logs).to_csv(outdir / "mpc_solver_logs.csv", index=False)
+    pd.DataFrame(logs_dynamic_v1).to_csv(outdir / "mpc_dynamic_v1_solver_logs.csv", index=False)
     pd.DataFrame(logs_static).to_csv(outdir / "mpc_static_solver_logs.csv", index=False)
     sanity_violations_df.to_csv(outdir / "mpc_baseline_reserve_sanity_violations.csv")
+    sanity_violations_dynamic_v1_df.to_csv(outdir / "mpc_dynamic_v1_baseline_reserve_sanity_violations.csv")
     sanity_violations_static_df.to_csv(outdir / "mpc_static_baseline_reserve_sanity_violations.csv")
 
     # Detect simultaneous opposite flows from the already-solved MPC trajectory.
@@ -283,6 +322,7 @@ def main() -> None:
     metrics_baseline_dynamic = summarize_metrics(data, baseline_dynamic, cfg)
     metrics_baseline_static = summarize_metrics(data, baseline_static, cfg)
     metrics_mpc = summarize_metrics(data_mpc, mpc, cfg)
+    metrics_mpc_dynamic_v1 = summarize_metrics(data_mpc_dynamic_v1, mpc_dynamic_v1, cfg_mpc_dynamic_v1)
     metrics_mpc_static = summarize_metrics(data_mpc_static, mpc_static, cfg_mpc_static)
     sanity_count_key = "mpc_baseline_reserve_sanity_violation_steps"
     sanity_max_deficit_key = "mpc_baseline_reserve_sanity_max_deficit_kwh"
@@ -292,11 +332,13 @@ def main() -> None:
     metrics_baseline_static[sanity_max_deficit_key] = 0.0
     metrics_mpc[sanity_count_key] = float(sanity_violation_steps)
     metrics_mpc[sanity_max_deficit_key] = sanity_max_deficit_kwh
+    metrics_mpc_dynamic_v1[sanity_count_key] = float(sanity_violation_dynamic_v1_steps)
+    metrics_mpc_dynamic_v1[sanity_max_deficit_key] = sanity_max_deficit_dynamic_v1_kwh
     metrics_mpc_static[sanity_count_key] = float(sanity_violation_static_steps)
     metrics_mpc_static[sanity_max_deficit_key] = sanity_max_deficit_static_kwh
     metrics = pd.DataFrame(
-        [metrics_baseline_static, metrics_baseline_dynamic, metrics_mpc_static, metrics_mpc],
-        index=["baseline_static", "baseline_dynamic", "mpc_static", "mpc"],
+        [metrics_baseline_static, metrics_baseline_dynamic, metrics_mpc_static, metrics_mpc_dynamic_v1, metrics_mpc],
+        index=["baseline_static", "baseline_dynamic", "mpc_static", "mpc_dynamic_v1", "mpc"],
     )
     metrics.to_csv(outdir / "metrics_comparison.csv")
     print(f"[stage] Computing metrics done in {perf_counter() - t_stage:.2f}s", flush=True)
@@ -324,6 +366,8 @@ def main() -> None:
     print(metrics.loc["baseline_dynamic"])
     print("\nStatic MPC metrics:")
     print(metrics.loc["mpc_static"])
+    print("\nDynamic V1 MPC metrics:")
+    print(metrics.loc["mpc_dynamic_v1"])
     print("\nMPC metrics:")
     print(metrics.loc["mpc"])
     print("\nSimultaneous opposite-flow counts (MPC run):")

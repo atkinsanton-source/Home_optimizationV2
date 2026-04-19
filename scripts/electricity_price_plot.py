@@ -162,6 +162,55 @@ def plot_weighted_grid_import_price(ax, grid_import_kwh, electricity_prices):
 
     return
 
+def plot_sorted_buy_prices_with_best_future_sell_price(ax, day_ahead_price):
+    cfg = EnergySystemConfig()
+    ev_battery_deg=cfg.ev_degradation_eur_per_kwh_charged
+    extra_costs_electricity=cfg.import_price_adder_eur_per_kwh
+    netzentgelt=cfg.export_price_adder_eur_per_kwh
+    stromsteuer = 0.0244
+    Mehrwehrtsteuer=cfg.import_price_adder_pct + 1.0
+    roundtrip_efficiency = cfg.ev_eta_ch*cfg.ev_eta_dis
+    threshold = extra_costs_electricity-netzentgelt-stromsteuer+ev_battery_deg
+
+    day_ahead_prices = list(day_ahead_price)
+    best_future_sell_prices = []
+
+    for current_index, current_day_ahead_price in enumerate(day_ahead_prices):
+        best_future_sell_price = None
+        end_index = min(current_index + 96, len(day_ahead_prices) - 1)
+        future_prices = day_ahead_prices[current_index + 1:end_index + 1]
+
+        if future_prices:
+            highest_future_price = max(future_prices)
+
+            if highest_future_price*roundtrip_efficiency - current_day_ahead_price * Mehrwehrtsteuer > threshold:
+                best_future_sell_price = highest_future_price
+
+        best_future_sell_prices.append(best_future_sell_price)
+
+    data = pd.DataFrame({
+        "buy_price": day_ahead_price,
+        "best_future_sell_price": best_future_sell_prices,
+    })
+
+    data = data.sort_values("buy_price")
+    data["hours"] = [x * 0.25 for x in range(1, len(data) + 1)]
+    profitable_hours = data["best_future_sell_price"].notna().sum() * 0.25
+
+    ax.plot(data["hours"], data["buy_price"], color="blue", label="Sorted buy price")
+    profitable_data = data[data["best_future_sell_price"].notna()]
+    ax.scatter(profitable_data["hours"], profitable_data["best_future_sell_price"], color="green", s=8, label="Best profitable sell price within 24h")
+    ax.set_xlabel("Hours")
+    ax.set_ylabel("Price Euro/KWh")
+    ax.set_title(
+        f"Sorted Buy Prices and Best Future Sell Prices\n"
+        f"Profitable Buy Windows: {profitable_hours:.1f} h"
+    )
+    ax.legend()
+    ax.grid(True)
+
+    return
+
 def plot_price_deltas_with_profit_in24h(ax, time, day_ahead_price, electricity_prices, discharging_mask=None, ev_at_home_mask=None, at_home_only=False):
     profitable_sell_mask = []
     cfg = EnergySystemConfig()
@@ -170,7 +219,7 @@ def plot_price_deltas_with_profit_in24h(ax, time, day_ahead_price, electricity_p
     netzentgelt=cfg.export_price_adder_eur_per_kwh
     stromsteuer = 0.0244
     Mehrwehrtsteuer=cfg.import_price_adder_pct + 1.0
-    roundtrip_efficiency = 0.9*0.9
+    roundtrip_efficiency = cfg.ev_eta_ch*cfg.ev_eta_dis
     
     threshold = extra_costs_electricity-netzentgelt-stromsteuer+ev_battery_deg
     
@@ -242,7 +291,7 @@ def plot_indifference_curve_v2g(ax,x):
     stromsteuer = 0.0244
     ev_battery_deg=cfg.ev_degradation_eur_per_kwh_charged
     extra_costs_electricity=cfg.import_price_adder_eur_per_kwh
-    roundtrip_efficiency = 0.9 * 0.9
+    roundtrip_efficiency = cfg.ev_eta_ch*cfg.ev_eta_dis
 
 
     y = [(value * (1.0 + Mehrwehrtsteuer) + extra_costs_electricity + ev_battery_deg - Netzentgelt - stromsteuer)/roundtrip_efficiency for value in x]
@@ -259,13 +308,13 @@ def plot_indifference_curve_v2g(ax,x):
     return 
 
 def plot_costs_and_revenues(cost_and_revenue_data):
-    models = ["baseline_static", "baseline_dynamic", "mpc_static", "mpc"]
+    models = ["baseline_static", "baseline_dynamic", "mpc_static", "mpc_dynamic_v1", "mpc"]
 
     cost_and_revenue_data = cost_and_revenue_data.copy()
     cost_and_revenue_data["model"] = pd.Categorical(cost_and_revenue_data["model"], categories=models, ordered=True)
     cost_and_revenue_data = cost_and_revenue_data.sort_values(["scenario", "model"]).reset_index(drop=True)
     scenarios = cost_and_revenue_data["scenario"].unique()
-    scenario_labels = ["Commuter Profile", "Noncommuter Profile", "Noncommuter Profile with half the Battery Degredation Costs"]
+    scenario_labels = ["Commuter Profile", "Noncommuter Profile", "Noncommuter Profile with half the Battery Degredation Costs", "Noncommuter Profile with 0 Battery Degredation Costs"]
 
     x_labels = [
         row.model
@@ -345,16 +394,16 @@ def plot_costs_and_revenues(cost_and_revenue_data):
     ax.set_xticklabels(x_labels, fontsize=7)
     ax.set_ylabel("Operational costs / revenues (€)", fontweight="bold")
     ax.set_title("Costs and revenues (2025)")
-    for scenario_index in range(1, len(scenarios)):
-        separator_index = scenario_index * len(models)
-        previous_pair_right = revenue_x[separator_index - 1] + width / 2
-        next_pair_left = x[separator_index] - width / 2
-        separator_x = (previous_pair_right + next_pair_left) / 2
-        ax.axvline(separator_x, color="gray", linestyle="--", linewidth=1, alpha=0.5)
     for scenario_index, scenario in enumerate(scenarios):
-        scenario_start = scenario_index * len(models)
-        scenario_end = scenario_start + len(models) - 1
+        scenario_rows = cost_and_revenue_data.index[cost_and_revenue_data["scenario"] == scenario].tolist()
+        scenario_start = scenario_rows[0]
+        scenario_end = scenario_rows[-1]
         scenario_center = (x[scenario_start] + x[scenario_end]) / 2 + (width + bar_gap) / 2
+        if scenario_index > 0:
+            previous_pair_right = revenue_x[scenario_start - 1] + width / 2
+            next_pair_left = x[scenario_start] - width / 2
+            separator_x = (previous_pair_right + next_pair_left) / 2
+            ax.axvline(separator_x, color="gray", linestyle="--", linewidth=1, alpha=0.5)
         ax.text(scenario_center, -0.11, scenario_labels[scenario_index], ha="center", va="top", fontsize=8, fontweight="bold", transform=ax.get_xaxis_transform())
         ax.text(scenario_center, -0.20, scenario, ha="center", va="top", fontsize=7, transform=ax.get_xaxis_transform())
     
@@ -369,13 +418,13 @@ def plot_costs_and_revenues(cost_and_revenue_data):
 
 
 def plot_energy_sinks_sources(cost_and_revenue_data):
-    models = ["baseline_static", "baseline_dynamic", "mpc_static", "mpc"]
+    models = ["baseline_static", "baseline_dynamic", "mpc_static", "mpc_dynamic_v1", "mpc"]
 
     cost_and_revenue_data = cost_and_revenue_data.copy()
     cost_and_revenue_data["model"] = pd.Categorical(cost_and_revenue_data["model"], categories=models, ordered=True)
     cost_and_revenue_data = cost_and_revenue_data.sort_values(["scenario", "model"]).reset_index(drop=True)
     scenarios = cost_and_revenue_data["scenario"].unique()
-    scenario_labels = ["Commuter Profile", "Noncommuter Profile", "Noncommuter Profile with half the Battery Degredation Costs"]
+    scenario_labels = ["Commuter Profile", "Noncommuter Profile", "Noncommuter Profile with half the Battery Degredation Costs", "Noncommuter Profile with 0 Battery Degredation Costs"]
     
     x_labels = [
         row.model
@@ -397,10 +446,10 @@ def plot_energy_sinks_sources(cost_and_revenue_data):
     ev_external_charge_kwh = [a + b + c + d for a, b, c, d in zip(ev_public_charge_kwh, ev_workplace_charge_kwh, ev_fast75_charge_kwh, ev_fast150_charge_kwh)]
 
     total_ev_charged = [a + b for a, b in zip(ev_external_charge_kwh, ev_charge_home_kwh)]
-    ev_charging_losses = [value * 0.1 for value in total_ev_charged]
+    ev_charging_losses = [value * 0.08 for value in total_ev_charged]
 
     total_ev_discharged = [a + b for a, b in zip(ev_discharge_home_kwh, ev_discharge_grid_kwh)]
-    ev_discharging_losses = [(value / 0.9) - value for value in total_ev_discharged]
+    ev_discharging_losses = [(value / 0.92) - value for value in total_ev_discharged]
 
 
 
@@ -479,16 +528,16 @@ def plot_energy_sinks_sources(cost_and_revenue_data):
     ax.set_ylabel("KWh", fontweight="bold")
     ax.set_title("Energy Sources and Sinks for Driver Profiles with a Tesla Model 3")
 
-    for scenario_index in range(1, len(scenarios)):
-        separator_index = scenario_index * len(models)
-        previous_pair_right = energy_out_x[separator_index - 1] + width / 2
-        next_pair_left = x[separator_index] - width / 2
-        separator_x = (previous_pair_right + next_pair_left) / 2
-        ax.axvline(separator_x, color="gray", linestyle="--", linewidth=1, alpha=0.5)
     for scenario_index, scenario in enumerate(scenarios):
-        scenario_start = scenario_index * len(models)
-        scenario_end = scenario_start + len(models) - 1
+        scenario_rows = cost_and_revenue_data.index[cost_and_revenue_data["scenario"] == scenario].tolist()
+        scenario_start = scenario_rows[0]
+        scenario_end = scenario_rows[-1]
         scenario_center = (x[scenario_start] + x[scenario_end]) / 2 + (width + bar_gap) / 2
+        if scenario_index > 0:
+            previous_pair_right = energy_out_x[scenario_start - 1] + width / 2
+            next_pair_left = x[scenario_start] - width / 2
+            separator_x = (previous_pair_right + next_pair_left) / 2
+            ax.axvline(separator_x, color="gray", linestyle="--", linewidth=1, alpha=0.5)
         ax.text(scenario_center, -0.11, scenario_labels[scenario_index], ha="center", va="top", fontsize=8, fontweight="bold", transform=ax.get_xaxis_transform())
         ax.text(scenario_center, -0.20, scenario, ha="center", va="top", fontsize=7, transform=ax.get_xaxis_transform())
 
@@ -508,9 +557,10 @@ def main():
     choice = input("Enter 1, 2 or 3: ")
 
     #For the Electricity Price Data
-    results_data_path=("/Users/anton.atkins/Documents/TU Berlin/Bachelor Arbeit/code/New_ModelV2/Home_optimizationV2/outputs/outputs_Tesla3_V3_79.5KWh_Commuter_0.9eff/mpc_results.csv")
+    results_data_path=("/Users/anton.atkins/Documents/TU Berlin/Bachelor Arbeit/code/New_ModelV2/Home_optimizationV2/outputs_incl_mpcdynamic/outputs_1_Tesla3_V3_79.5KWh_Commuter_incl_mpcdynamic/mpc_results.csv")
     initial_data_path=("/Users/anton.atkins/Documents/TU Berlin/Bachelor Arbeit/code/New_ModelV2/Home_optimizationV2/data/LPG_FlexEhome_2025_Tesla3_79.5_Commuter.csv")
-    
+    output_folder_path = "/Users/anton.atkins/Documents/TU Berlin/Bachelor Arbeit/code/New_ModelV2/Home_optimizationV2/outputs_incl_mpcdynamic"
+
     if choice == "1":
         data = ElectricityPriceData.from_csv(results_data_path, initial_data_path)
 
@@ -524,21 +574,19 @@ def main():
         plot_priced_hours(axes[0, 2], data.electricity_prices_at_home, "Sorted Dynamic Electricity Price When EV Is At Home")
         plot_weighted_grid_import_price(axes[0, 3], data.grid_import_kwh, data.electricity_prices)
         plot_indifference_curve_v2g(axes[1, 2], x)
-        axes[1, 3].axis("off")
+        plot_sorted_buy_prices_with_best_future_sell_price(axes[1, 3], data.day_ahead_price)
         plt.tight_layout()
         plt.show()
 
     elif choice == "2":
         wanted_columns = ["external_charge_public_kwh", "external_charge_workplace_kwh", "external_charge_fast75_kwh", "external_charge_fast150_kwh", "grid_import_kwh", "ev_consumption_kwh", "ev_discharge_to_home_kwh", "ev_discharge_to_grid_kwh", "home_load_grid_import_kwh", "home_ev_charge_kwh", "ev_initial_energy_kwh", "ev_final_energy_kwh"]
-        base_path = "/Users/anton.atkins/Documents/TU Berlin/Bachelor Arbeit/code/New_ModelV2/Home_optimizationV2/outputs"
-        costs_revenue_metrics_combined_data= ElectricityPriceData.from_output_metrics(base_path, wanted_columns)
+        costs_revenue_metrics_combined_data= ElectricityPriceData.from_output_metrics(output_folder_path, wanted_columns)
         plot_energy_sinks_sources(costs_revenue_metrics_combined_data)
 
         
     elif choice == "3":
         wanted_columns_stacked = ["external_charge_public_cost_eur", "external_charge_workplace_cost_eur", "external_charge_fast75_cost_eur", "external_charge_fast150_cost_eur", "ev_battery_degradation_cost_eur", "ev_home_charge_cost_eur", "home_load_cost_eur", "ev_discharge_grid_revenue_eur"]
-        base_path_stacked = "/Users/anton.atkins/Documents/TU Berlin/Bachelor Arbeit/code/New_ModelV2/Home_optimizationV2/outputs"
-        costs_revenue_metrics_combined_data= ElectricityPriceData.from_output_metrics(base_path_stacked, wanted_columns_stacked)
+        costs_revenue_metrics_combined_data= ElectricityPriceData.from_output_metrics(output_folder_path, wanted_columns_stacked)
         plot_costs_and_revenues(costs_revenue_metrics_combined_data)
 
     else:

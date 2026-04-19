@@ -80,8 +80,8 @@ class EnergySystemConfig:
     ev_cap_kwh: float = 79.5
     ev_soc_init: float = 1.0
     ev_soc_min: float = 0.3
-    ev_eta_ch: float = 0.9
-    ev_eta_dis: float = 0.90
+    ev_eta_ch: float = 0.92
+    ev_eta_dis: float = 0.92
 
     # Charging-point specific limits and prices
     ev_cp_charge_power_kw: Dict[str, float] = field(default_factory=_default_ev_cp_charge_power_kw)
@@ -109,6 +109,7 @@ class EnergySystemConfig:
     gurobi_mipfocus: Optional[int] = None
     use_persistent_gurobi: bool = True
     use_mip_start: bool = True
+    mpc_apply_steps: int = 1
     pad_tail_neutral_prices: bool = True                #maybe remove
     pad_tail_price_eur_per_kwh: float = 0.0             #maybe remove
 

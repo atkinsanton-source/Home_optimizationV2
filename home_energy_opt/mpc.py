@@ -355,16 +355,16 @@ class PersistentMPCSolver:
             return 0.0
         return float(var_family[t].X)
 
-    def extract_first_action(self) -> Dict[str, float]:
-        """Return first-step control action in both detailed and compatibility fields."""
+    def extract_action(self, t: int = 0) -> Dict[str, float]:
+        """Return one horizon action in both detailed and compatibility fields."""
         t0 = perf_counter()
-        ev_home_ch = self._x("p_ev_home_ch", 0)
-        ev_ext_ch = self._x("p_ev_ext_ch", 0)
-        ev_dis_house = self._x("p_ev_dis_house", 0)
-        ev_dis_grid = self._x("p_ev_dis_grid", 0)
+        ev_home_ch = self._x("p_ev_home_ch", t)
+        ev_ext_ch = self._x("p_ev_ext_ch", t)
+        ev_dis_house = self._x("p_ev_dis_house", t)
+        ev_dis_grid = self._x("p_ev_dis_grid", t)
         out = {
-            "grid_import_kw": self._x("p_grid_import", 0),
-            "grid_export_kw": self._x("p_grid_export", 0),
+            "grid_import_kw": self._x("p_grid_import", t),
+            "grid_export_kw": self._x("p_grid_export", t),
             "bat_ch_kw": 0.0,
             "bat_dis_kw": 0.0,
             "ev_home_ch_kw": ev_home_ch,
@@ -376,6 +376,10 @@ class PersistentMPCSolver:
         }
         self.last_extract_time_sec = perf_counter() - t0
         return out
+
+    def extract_first_action(self) -> Dict[str, float]:
+        """Return first-step control action in both detailed and compatibility fields."""
+        return self.extract_action(0)
 
     def extract_solution_full_horizon(self) -> Dict[str, List[float]]:
         t0 = perf_counter()
@@ -428,6 +432,25 @@ def _safe_fallback_step(row: pd.Series, cfg: EnergySystemConfig, e_ev: float) ->
         "ev_dis_to_grid_kw": 0.0,
         "ev_ch_kw": p_ev_home_ch + p_ev_ext_ch,
         "ev_dis_kw": p_ev_dis_to_home,
+    }
+
+
+def _action_from_solution(solution: Dict[str, List[float]], t: int) -> Dict[str, float]:
+    ev_home_ch = float(solution.get("p_ev_home_ch", [0.0])[t]) if "p_ev_home_ch" in solution else 0.0
+    ev_ext_ch = float(solution.get("p_ev_ext_ch", [0.0])[t]) if "p_ev_ext_ch" in solution else 0.0
+    ev_dis_house = float(solution.get("p_ev_dis_house", [0.0])[t]) if "p_ev_dis_house" in solution else 0.0
+    ev_dis_grid = float(solution.get("p_ev_dis_grid", [0.0])[t]) if "p_ev_dis_grid" in solution else 0.0
+    return {
+        "grid_import_kw": float(solution.get("p_grid_import", [0.0])[t]) if "p_grid_import" in solution else 0.0,
+        "grid_export_kw": float(solution.get("p_grid_export", [0.0])[t]) if "p_grid_export" in solution else 0.0,
+        "bat_ch_kw": 0.0,
+        "bat_dis_kw": 0.0,
+        "ev_home_ch_kw": ev_home_ch,
+        "ev_ext_ch_kw": ev_ext_ch,
+        "ev_dis_to_home_kw": ev_dis_house,
+        "ev_dis_to_grid_kw": ev_dis_grid,
+        "ev_ch_kw": ev_home_ch + ev_ext_ch,
+        "ev_dis_kw": ev_dis_house + ev_dis_grid,
     }
 
 
@@ -504,24 +527,26 @@ def run_mpc_loop(
         print(f"[MPC] Gurobi import/init took {gurobi_init_sec:.2f}s")
         print(
             f"[MPC] Starting rolling optimization: steps={n_steps}, horizon={cfg.horizon_steps}, "
+            f"apply_steps={max(1, int(cfg.mpc_apply_steps))}, "
             f"report_every={progress_every}, slow_step_sec={slow_step_sec:.2f}"
         )
 
     prev_solution: Optional[Dict[str, List[float]]] = None
+    prev_solution_shift = 1
     # Diagnostics timing state:
     # - `prev_e_ev_raw` becomes this row's start-of-step raw EV energy.
     # - `prev_used_fallback` links current clamp diagnostics to the previous step action source.
     prev_e_ev_raw = e_ev
     prev_used_fallback = 0
-    # Receding-horizon loop:
-    # solve a window -> apply only first action -> shift window by 1 step.
-    for i, (ts, row) in enumerate(df.iterrows()):
-        e_ev_start = e_ev
-        e_ev_pre_clamp_start = prev_e_ev_raw
+    # Receding-horizon loop: solve a window, apply one or more horizon actions, then replan.
+    i = 0
+    while i < n_steps:
+        ts = df.index[i]
         window = df.iloc[i : i + cfg.horizon_steps]
-        step: Dict[str, float] = {}
+        apply_steps = min(max(1, int(cfg.mpc_apply_steps)), cfg.horizon_steps, n_steps - i)
+        block_actions: List[Dict[str, float]] = []
         status = "not_run"
-        t_step_start = perf_counter()
+        t_block_start = perf_counter()
         update_sec = 0.0
         extract_sec = 0.0
         used_fallback = 0
@@ -535,130 +560,145 @@ def run_mpc_loop(
                 persistent_solver.update(arrays, soc_ev_now=e_ev)
                 if use_mip_start and prev_solution is not None:
                     # Warm-start from previous solution to reduce solve time.
-                    persistent_solver.apply_mip_start(prev_solution, shift=1)
+                    persistent_solver.apply_mip_start(prev_solution, shift=prev_solution_shift)
                 update_sec = perf_counter() - t_update
 
                 status = persistent_solver.optimize()
                 if persistent_solver.model.SolCount > 0:
-                    # Key MPC step: apply only the first control action from the optimal horizon.
-                    step = persistent_solver.extract_first_action()
-                    extract_sec = persistent_solver.last_extract_time_sec
+                    # Apply the configured number of actions from this optimized horizon before replanning.
+                    t_extract = perf_counter()
+                    block_actions = [persistent_solver.extract_action(t) for t in range(apply_steps)]
+                    extract_sec = perf_counter() - t_extract
                     if use_mip_start:
                         prev_solution = persistent_solver.extract_solution_full_horizon()
+                        prev_solution_shift = apply_steps
                 else:
                     # If optimization returns no solution, fall back to a safe heuristic.
-                    step = _safe_fallback_step(row, cfg, e_ev)
                     used_fallback = 1
                     logs.append({"timestamp": str(ts), "step": i + 1, "status": status, "action": "fallback"})
             else:
                 # Legacy mode: rebuild model per window (slower, but useful for regression comparison).
                 solved = _build_and_solve_window_gurobi(window, cfg, e_ev, solver_tee=solver_tee)
                 status = solved.status
-                if solved.first_step:
-                    step = solved.first_step
+                if solved.full_solution:
+                    block_actions = [_action_from_solution(solved.full_solution, t) for t in range(apply_steps)]
                     if use_mip_start:
                         prev_solution = solved.full_solution
+                        prev_solution_shift = apply_steps
                 else:
-                    step = _safe_fallback_step(row, cfg, e_ev)
                     used_fallback = 1
                     logs.append({"timestamp": str(ts), "step": i + 1, "status": status, "action": "fallback"})
         except Exception as ex:
             # Defensive behavior: never stop the whole run because one step failed.
             status = f"error:{ex}"
-            step = _safe_fallback_step(row, cfg, e_ev)
             used_fallback = 1
             logs.append({"timestamp": str(ts), "step": i + 1, "status": status, "action": "fallback"})
 
         # Track pure optimization time and full step time separately.
         solve_sec = perf_counter() - t_solve_start
-        step_total_sec = perf_counter() - t_step_start
+        block_total_sec = perf_counter() - t_block_start
         if solve_sec > slowest_solve_sec:
             slowest_solve_sec = solve_sec
             slowest_solve_ts = str(ts)
 
-        drive_kwh = float(row["ev_drive_kwh"])
-        # Crucial state transition: previous energy + charging - discharging - driving consumption.
-        e_ev_raw_next = (
-            e_ev
-            + (cfg.ev_eta_ch * (step["ev_home_ch_kw"] + step["ev_ext_ch_kw"]))
-            * cfg.dt_hours
-            - ((step["ev_dis_to_home_kw"] + step["ev_dis_to_grid_kw"]) / cfg.ev_eta_dis) * cfg.dt_hours
-            - drive_kwh
-        )
-
-        # Clamp carried state against the reserve of the step it will be used in (i+1),
-        # not the reserve of the action step (i), to avoid a one-step timing mismatch.
-        if i + 1 < n_steps:
-            ev_lb_carry = _effective_ev_lb(cfg, ev_reserve_kwh_by_step[i + 1])
-        else:
-            ev_lb_carry = _effective_ev_lb(cfg, ev_reserve_kwh_by_step[i])
-        e_ev = min(max(e_ev_raw_next, ev_lb_carry), cfg.ev_cap_kwh)
-        # Clamp diagnostics are reported as start-of-step quantities:
-        # compare current clamped start state vs previous step raw carry-over.
-        ev_soc_clamp_delta_kwh = e_ev_start - e_ev_pre_clamp_start
-        if abs(ev_soc_clamp_delta_kwh) <= EV_SOC_CLAMP_EPS_KWH:
-            ev_soc_clamp_delta_kwh = 0.0
-        ev_soc_clamped = float(abs(ev_soc_clamp_delta_kwh) > 0.0)
-        ev_soc_clamped_after_fallback = float(prev_used_fallback and ev_soc_clamped > 0.5)
-        e_bat = min(max(e_bat, cfg.bat_soc_min * cfg.bat_cap_kwh), cfg.bat_soc_max * cfg.bat_cap_kwh)
-
-        step.update(
-            {
-                "bat_energy_kwh": e_bat,
-                "ev_energy_kwh": e_ev_start,
-                "ev_energy_pre_clamp_kwh": e_ev_pre_clamp_start,
-                "ev_soc_clamped": ev_soc_clamped,
-                "ev_soc_clamp_delta_kwh": ev_soc_clamp_delta_kwh,
-                "ev_soc_clamped_after_fallback": ev_soc_clamped_after_fallback,
-                "ev_soc_clamp_after_fallback_delta_kwh": ev_soc_clamp_delta_kwh if ev_soc_clamped_after_fallback > 0.5 else 0.0,
-                "ev_consumption_kwh": drive_kwh,
-                "solver_status": status,
-                "used_fallback": float(used_fallback),
-            }
-        )
-        rows.append(step)
-        # Keep one compact diagnostic row per solved timestep.
-        logs.append(
-            {
-                "timestamp": str(ts),
-                "step": i + 1,
-                "total_steps": n_steps,
-                "window_steps": len(window),
-                "status": status,
-                "build_once_time_sec": round(build_once_sec, 6),
-                "update_seconds": round(update_sec, 6),
-                "solve_seconds": round(solve_sec, 4),
-                "extract_seconds": round(extract_sec, 6),
-                "step_total_seconds": round(step_total_sec, 4),
-                "used_fallback": int(used_fallback),
-                "ev_soc_clamped": int(ev_soc_clamped > 0.5),
-                "ev_soc_clamp_delta_kwh": round(ev_soc_clamp_delta_kwh, 6),
-                "ev_soc_clamped_after_fallback": int(ev_soc_clamped_after_fallback > 0.5),
-            }
-        )
-
-        if show_progress:
-            completed = i + 1
-            # Print first/last/periodic updates and any unusually slow solve.
-            should_report = (
-                completed == 1
-                or completed == n_steps
-                or completed % max(1, progress_every) == 0
-                or solve_sec >= slow_step_sec
+        for local_t in range(apply_steps):
+            j = i + local_t
+            ts_step = df.index[j]
+            row = df.iloc[j]
+            e_ev_start = e_ev
+            e_ev_pre_clamp_start = prev_e_ev_raw
+            step = (
+                block_actions[local_t]
+                if local_t < len(block_actions)
+                else _safe_fallback_step(row, cfg, e_ev)
             )
-            if should_report:
-                elapsed = perf_counter() - t_loop_start
-                avg_step_sec = elapsed / completed
-                eta_sec = avg_step_sec * (n_steps - completed)
-                print(
-                    f"[MPC] {completed}/{n_steps} ({100.0 * completed / n_steps:.1f}%) "
-                    f"ts={ts} solve={solve_sec:.2f}s step={step_total_sec:.2f}s avg={avg_step_sec:.2f}s "
-                    f"eta={eta_sec / 60.0:.1f}m status={status}"
-                )
 
-        # Carry timing state for next row diagnostics.
-        prev_e_ev_raw = e_ev_raw_next
-        prev_used_fallback = used_fallback
+            drive_kwh = float(row["ev_drive_kwh"])
+            # Crucial state transition: previous energy + charging - discharging - driving consumption.
+            e_ev_raw_next = (
+                e_ev
+                + (cfg.ev_eta_ch * (step["ev_home_ch_kw"] + step["ev_ext_ch_kw"]))
+                * cfg.dt_hours
+                - ((step["ev_dis_to_home_kw"] + step["ev_dis_to_grid_kw"]) / cfg.ev_eta_dis) * cfg.dt_hours
+                - drive_kwh
+            )
+
+            # Clamp carried state against the reserve of the step it will be used in (j+1),
+            # not the reserve of the action step (j), to avoid a one-step timing mismatch.
+            if j + 1 < n_steps:
+                ev_lb_carry = _effective_ev_lb(cfg, ev_reserve_kwh_by_step[j + 1])
+            else:
+                ev_lb_carry = _effective_ev_lb(cfg, ev_reserve_kwh_by_step[j])
+            e_ev = min(max(e_ev_raw_next, ev_lb_carry), cfg.ev_cap_kwh)
+            # Clamp diagnostics are reported as start-of-step quantities:
+            # compare current clamped start state vs previous step raw carry-over.
+            ev_soc_clamp_delta_kwh = e_ev_start - e_ev_pre_clamp_start
+            if abs(ev_soc_clamp_delta_kwh) <= EV_SOC_CLAMP_EPS_KWH:
+                ev_soc_clamp_delta_kwh = 0.0
+            ev_soc_clamped = float(abs(ev_soc_clamp_delta_kwh) > 0.0)
+            ev_soc_clamped_after_fallback = float(prev_used_fallback and ev_soc_clamped > 0.5)
+            e_bat = min(max(e_bat, cfg.bat_soc_min * cfg.bat_cap_kwh), cfg.bat_soc_max * cfg.bat_cap_kwh)
+
+            step.update(
+                {
+                    "bat_energy_kwh": e_bat,
+                    "ev_energy_kwh": e_ev_start,
+                    "ev_energy_pre_clamp_kwh": e_ev_pre_clamp_start,
+                    "ev_soc_clamped": ev_soc_clamped,
+                    "ev_soc_clamp_delta_kwh": ev_soc_clamp_delta_kwh,
+                    "ev_soc_clamped_after_fallback": ev_soc_clamped_after_fallback,
+                    "ev_soc_clamp_after_fallback_delta_kwh": ev_soc_clamp_delta_kwh if ev_soc_clamped_after_fallback > 0.5 else 0.0,
+                    "ev_consumption_kwh": drive_kwh,
+                    "solver_status": status,
+                    "used_fallback": float(used_fallback),
+                }
+            )
+            rows.append(step)
+            logs.append(
+                {
+                    "timestamp": str(ts_step),
+                    "step": j + 1,
+                    "total_steps": n_steps,
+                    "window_steps": len(window),
+                    "apply_steps": apply_steps,
+                    "applied_step_in_block": local_t + 1,
+                    "status": status,
+                    "build_once_time_sec": round(build_once_sec, 6) if local_t == 0 else 0.0,
+                    "update_seconds": round(update_sec, 6) if local_t == 0 else 0.0,
+                    "solve_seconds": round(solve_sec, 4) if local_t == 0 else 0.0,
+                    "extract_seconds": round(extract_sec, 6) if local_t == 0 else 0.0,
+                    "step_total_seconds": round(block_total_sec, 4) if local_t == 0 else 0.0,
+                    "used_fallback": int(used_fallback),
+                    "ev_soc_clamped": int(ev_soc_clamped > 0.5),
+                    "ev_soc_clamp_delta_kwh": round(ev_soc_clamp_delta_kwh, 6),
+                    "ev_soc_clamped_after_fallback": int(ev_soc_clamped_after_fallback > 0.5),
+                }
+            )
+
+            if show_progress:
+                completed = j + 1
+                should_report = (
+                    completed == 1
+                    or completed == n_steps
+                    or completed % max(1, progress_every) == 0
+                    or (local_t == 0 and solve_sec >= slow_step_sec)
+                )
+                if should_report:
+                    elapsed = perf_counter() - t_loop_start
+                    avg_step_sec = elapsed / completed
+                    eta_sec = avg_step_sec * (n_steps - completed)
+                    print(
+                        f"[MPC] {completed}/{n_steps} ({100.0 * completed / n_steps:.1f}%) "
+                        f"ts={ts_step} solve={solve_sec if local_t == 0 else 0.0:.2f}s "
+                        f"step={block_total_sec if local_t == 0 else 0.0:.2f}s avg={avg_step_sec:.2f}s "
+                        f"eta={eta_sec / 60.0:.1f}m status={status}"
+                    )
+
+            # Carry timing state for next row diagnostics.
+            prev_e_ev_raw = e_ev_raw_next
+            prev_used_fallback = used_fallback
+
+        i += apply_steps
 
     if show_progress:
         total_elapsed_sec = perf_counter() - t_loop_start
