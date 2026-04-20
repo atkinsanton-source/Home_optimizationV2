@@ -307,6 +307,77 @@ def plot_indifference_curve_v2g(ax,x):
 
     return 
 
+def plot_carpet(ax, time, values, title, colorbar_label, fig, cmap="viridis", clip_values=True, vmin=None, vmax=None):
+    data = pd.DataFrame({
+        "time": time,
+        "value": pd.to_numeric(values, errors="coerce"),
+    })
+
+    data["date"] = data["time"].dt.date
+    data["time_of_day"] = data["time"].dt.hour + data["time"].dt.minute / 60
+    carpet_data = data.pivot_table(index="time_of_day", columns="date", values="value", aggfunc="mean")
+    carpet_data = carpet_data.sort_index()
+
+    if clip_values:
+        values_for_clipping = carpet_data.stack()
+        if vmin is None:
+            vmin = values_for_clipping.quantile(0.01)
+        if vmax is None:
+            vmax = values_for_clipping.quantile(0.99)
+
+    image = ax.imshow(carpet_data, aspect="auto", origin="upper", cmap=cmap, vmin=vmin, vmax=vmax)
+    colorbar = fig.colorbar(image, ax=ax)
+    colorbar.set_label(colorbar_label)
+
+    dates = pd.to_datetime(carpet_data.columns)
+    month_ticks = []
+    month_labels = []
+    for index, date in enumerate(dates):
+        if date.day == 1:
+            month_ticks.append(index)
+            month_labels.append(date.strftime("%b"))
+
+    hour_ticks = []
+    hour_labels = []
+    for hour in range(0, 25, 4):
+        closest_time_index = min(range(len(carpet_data.index)), key=lambda index: abs(carpet_data.index[index] - hour))
+        hour_ticks.append(closest_time_index)
+        hour_labels.append(f"{hour:02d}:00")
+
+    ax.set_xticks(month_ticks)
+    ax.set_xticklabels(month_labels)
+    ax.set_yticks(hour_ticks)
+    ax.set_yticklabels(hour_labels)
+    ax.set_xlabel("Month")
+    ax.set_ylabel("Time of day")
+    ax.set_title(title)
+
+    return
+
+def plot_carpet_plots(results_data_path):
+    cfg = EnergySystemConfig()
+    data = pd.read_csv(results_data_path)
+    time = pd.to_datetime(data["local_time"])
+    ev_soc_pct = data["ev_energy_kwh"] / cfg.ev_cap_kwh * 100
+    ev_charge_kw = data["ev_home_ch_kw"] + data["ev_ext_ch_kw"]
+    ev_discharge_kw = data["ev_dis_to_home_kw"] + data["ev_dis_to_grid_kw"]
+    ev_charge_discharge_kw = ev_charge_kw - ev_discharge_kw
+    result_name = Path(results_data_path).parent.name
+
+    fig, axes = plt.subplots(3, 2, figsize=(14, 10))
+    plot_carpet(axes[0, 0], time, data["home_grid_price_total_eur_per_kwh"], "Consumer Buy Price", "Euro/KWh", fig, cmap="viridis")
+    plot_carpet(axes[0, 1], time, ev_soc_pct, "EV State of Charge", "SOC [%]", fig, cmap="YlGn", clip_values=False, vmin=0, vmax=100)
+    plot_carpet(axes[1, 0], time, data["grid_import_kw"], "Grid Import Usage", "KW", fig, cmap="Blues", clip_values=False)
+    plot_carpet(axes[1, 1], time, data["grid_export_kw"], "Grid Export Usage", "KW", fig, cmap="Oranges", clip_values=False)
+    plot_carpet(axes[2, 0], time, data["ev_dis_to_home_kw"], "EV Discharge to Home", "KW", fig, cmap="Greens", clip_values=False, vmin=0)
+    plot_carpet(axes[2, 1], time, ev_charge_discharge_kw, "EV Charge and Discharge", "KW", fig, cmap="coolwarm", clip_values=False, vmin=-11, vmax=30)
+
+    fig.suptitle(f"Carpet Plots for {result_name}", fontsize=14, fontweight="bold")
+    plt.tight_layout()
+    plt.show()
+
+    return
+
 def plot_costs_and_revenues(cost_and_revenue_data):
     models = ["baseline_static", "baseline_dynamic", "mpc_static", "mpc_dynamic_v1", "mpc"]
 
@@ -327,7 +398,7 @@ def plot_costs_and_revenues(cost_and_revenue_data):
     fast150_charge_costs = cost_and_revenue_data["external_charge_fast150_cost_eur"].tolist()
     ev_battery_degradation_costs = cost_and_revenue_data["ev_battery_degradation_cost_eur"].tolist()
     ev_home_charge_costs = cost_and_revenue_data["ev_home_charge_cost_eur"].tolist()
-    home_load_costs = cost_and_revenue_data["home_load_cost_eur"].tolist()
+    home_load_costs = [a + b for a, b in zip(cost_and_revenue_data["home_load_cost_eur"].tolist(), ev_home_charge_costs)]
     ev_discharge_grid_revenues = cost_and_revenue_data["ev_discharge_grid_revenue_eur"].tolist()
     external_charge_costs = [a + b + c + d for a, b, c, d in zip(public_charge_costs, workplace_charge_costs, fast75_charge_costs, fast150_charge_costs)]
 
@@ -352,16 +423,13 @@ def plot_costs_and_revenues(cost_and_revenue_data):
     bottom_fast150_charge = [a + b for a, b in zip(bottom_fast75_charge, fast75_charge_costs)]
     bars_fast150_charge = ax.bar(x, fast150_charge_costs, width=width, bottom=bottom_fast150_charge, label="Fast 150 charge cost", color="#8c2d04", **bar_style)
 
-    bottom_ev_home_charge = [a + b for a, b in zip(home_load_costs, external_charge_costs)]
-    bars_ev_home_charge = ax.bar(x, ev_home_charge_costs, width=width, bottom=bottom_ev_home_charge, label="EV home charge cost", color="#3366cc", **bar_style)
-
-    bottom_ev_battery_deg = [a + b + c for a, b, c in zip(home_load_costs, external_charge_costs, ev_home_charge_costs)]
+    bottom_ev_battery_deg = [a + b for a, b in zip(home_load_costs, external_charge_costs)]
     bars_ev_battery_deg = ax.bar(x, ev_battery_degradation_costs, width=width, bottom=bottom_ev_battery_deg, label="EV battery degradation cost", color="#b8860b", **bar_style)
 
     revenue_x = [value + width + bar_gap for value in x]
     bars_revenue = ax.bar(revenue_x, ev_discharge_grid_revenues, width=width, label="EV discharge grid revenue", color="#2ca02c", **bar_style)
 
-    total_costs = [a + b + c + d for a, b, c, d in zip(home_load_costs, external_charge_costs, ev_home_charge_costs, ev_battery_degradation_costs)]
+    total_costs = [a + b + c for a, b, c in zip(home_load_costs, external_charge_costs, ev_battery_degradation_costs)]
     net_values = [cost - revenue for cost, revenue in zip(total_costs, ev_discharge_grid_revenues)]
 
     net_label_added = False
@@ -386,7 +454,6 @@ def plot_costs_and_revenues(cost_and_revenue_data):
     ax.bar_label(bars_workplace_charge, labels=[f"{value:.1f}" if value > 0 else "" for value in workplace_charge_costs], label_type="center", fontsize=7)
     ax.bar_label(bars_fast75_charge, labels=[f"{value:.1f}" if value > 0 else "" for value in fast75_charge_costs], label_type="center", fontsize=7)
     ax.bar_label(bars_fast150_charge, labels=[f"{value:.1f}" if value > 0 else "" for value in fast150_charge_costs], label_type="center", fontsize=7)
-    ax.bar_label(bars_ev_home_charge, labels=[f"{value:.1f}" if value > 0 else "" for value in ev_home_charge_costs], label_type="center", fontsize=7)
     ax.bar_label(bars_ev_battery_deg, labels=[f"{value:.1f}" if value > 0 else "" for value in ev_battery_degradation_costs], label_type="center", fontsize=7)
     ax.bar_label(bars_revenue, labels=[f"{value:.1f}" if value > 0 else "" for value in ev_discharge_grid_revenues], label_type="center", fontsize=7)
 
@@ -554,12 +621,13 @@ def main():
     print("1: Electricity price plots")
     print("2: Energy Sources and Sinks")
     print("3: Costs and Revenue Analysis")
-    choice = input("Enter 1, 2 or 3: ")
+    print("4: Carpet plots")
+    choice = input("Enter 1, 2, 3 or 4: ")
 
     #For the Electricity Price Data
-    results_data_path=("/Users/anton.atkins/Documents/TU Berlin/Bachelor Arbeit/code/New_ModelV2/Home_optimizationV2/outputs_incl_mpcdynamic/outputs_1_Tesla3_V3_79.5KWh_Commuter_incl_mpcdynamic/mpc_results.csv")
+    results_data_path=("/Users/anton.atkins/Documents/TU Berlin/Bachelor Arbeit/code/New_ModelV2/Home_optimizationV2/outputs_incl_mpcdynamic/outputs_3_Tesla3_V3_79.5KWh_Noncommuter_incl_mpcdynamic_0.5degcost/mpc_results.csv")
     initial_data_path=("/Users/anton.atkins/Documents/TU Berlin/Bachelor Arbeit/code/New_ModelV2/Home_optimizationV2/data/LPG_FlexEhome_2025_Tesla3_79.5_Commuter.csv")
-    output_folder_path = "/Users/anton.atkins/Documents/TU Berlin/Bachelor Arbeit/code/New_ModelV2/Home_optimizationV2/outputs_incl_mpcdynamic"
+    output_folder_path = "/Users/anton.atkins/Documents/TU Berlin/Bachelor Arbeit/code/New_ModelV2/Home_optimizationV2/outputs_V2_incl_mpcdynamic"
 
     if choice == "1":
         data = ElectricityPriceData.from_csv(results_data_path, initial_data_path)
@@ -589,8 +657,11 @@ def main():
         costs_revenue_metrics_combined_data= ElectricityPriceData.from_output_metrics(output_folder_path, wanted_columns_stacked)
         plot_costs_and_revenues(costs_revenue_metrics_combined_data)
 
+    elif choice == "4":
+        plot_carpet_plots(results_data_path)
+
     else:
-        print("Invalid choice. Please enter 1, 2 or 3.")
+        print("Invalid choice. Please enter 1, 2, 3 or 4.")
 
 
     return
