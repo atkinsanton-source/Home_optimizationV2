@@ -307,7 +307,7 @@ def plot_indifference_curve_v2g(ax,x):
 
     return 
 
-def plot_carpet(ax, time, values, title, colorbar_label, fig, cmap="viridis", clip_values=True, vmin=None, vmax=None):
+def plot_carpet(ax, time, values, title, colorbar_label, fig, cmap="viridis", clip_values=True, vmin=None, vmax=None, show_colorbar=True):
     data = pd.DataFrame({
         "time": time,
         "value": pd.to_numeric(values, errors="coerce"),
@@ -326,8 +326,9 @@ def plot_carpet(ax, time, values, title, colorbar_label, fig, cmap="viridis", cl
             vmax = values_for_clipping.quantile(0.99)
 
     image = ax.imshow(carpet_data, aspect="auto", origin="upper", cmap=cmap, vmin=vmin, vmax=vmax)
-    colorbar = fig.colorbar(image, ax=ax)
-    colorbar.set_label(colorbar_label)
+    if show_colorbar:
+        colorbar = fig.colorbar(image, ax=ax)
+        colorbar.set_label(colorbar_label)
 
     dates = pd.to_datetime(carpet_data.columns)
     month_ticks = []
@@ -342,38 +343,189 @@ def plot_carpet(ax, time, values, title, colorbar_label, fig, cmap="viridis", cl
     for hour in range(0, 25, 4):
         closest_time_index = min(range(len(carpet_data.index)), key=lambda index: abs(carpet_data.index[index] - hour))
         hour_ticks.append(closest_time_index)
-        hour_labels.append(f"{hour:02d}:00")
+        hour_labels.append(f"{hour:02d}")
 
     ax.set_xticks(month_ticks)
-    ax.set_xticklabels(month_labels)
+    ax.set_xticklabels(month_labels, fontsize=7)
     ax.set_yticks(hour_ticks)
-    ax.set_yticklabels(hour_labels)
-    ax.set_xlabel("Month")
-    ax.set_ylabel("Time of day")
+    ax.set_yticklabels(hour_labels, fontsize=7)
+    ax.set_xlabel("Month", fontsize=8)
+    ax.set_ylabel("Time of day", fontsize=8)
     ax.set_title(title)
 
-    return
+    return image
 
-def plot_carpet_plots(results_data_path):
+def calculate_best_future_v2g_profit_margin(home_grid_price_total_eur_per_kwh, scenario_name):
     cfg = EnergySystemConfig()
-    data = pd.read_csv(results_data_path)
-    time = pd.to_datetime(data["local_time"])
-    ev_soc_pct = data["ev_energy_kwh"] / cfg.ev_cap_kwh * 100
-    ev_charge_kw = data["ev_home_ch_kw"] + data["ev_ext_ch_kw"]
-    ev_discharge_kw = data["ev_dis_to_home_kw"] + data["ev_dis_to_grid_kw"]
-    ev_charge_discharge_kw = ev_charge_kw - ev_discharge_kw
-    result_name = Path(results_data_path).parent.name
+    extra_costs_electricity = cfg.import_price_adder_eur_per_kwh
+    mehrwertsteuer = cfg.import_price_adder_pct + 1.0
+    netzentgelt = cfg.export_price_adder_eur_per_kwh
+    stromsteuer = 0.0244
+    if "0.5degcost" in scenario_name:
+        ev_battery_deg = cfg.ev_degradation_eur_per_kwh_charged / 2
+    elif "0deg" in scenario_name:
+        ev_battery_deg = 0
+    else:
+        ev_battery_deg = cfg.ev_degradation_eur_per_kwh_charged
+    roundtrip_efficiency = cfg.ev_eta_ch * cfg.ev_eta_dis
+    threshold = extra_costs_electricity - netzentgelt - stromsteuer + ev_battery_deg
 
-    fig, axes = plt.subplots(3, 2, figsize=(14, 10))
-    plot_carpet(axes[0, 0], time, data["home_grid_price_total_eur_per_kwh"], "Consumer Buy Price", "Euro/KWh", fig, cmap="viridis")
-    plot_carpet(axes[0, 1], time, ev_soc_pct, "EV State of Charge", "SOC [%]", fig, cmap="YlGn", clip_values=False, vmin=0, vmax=100)
-    plot_carpet(axes[1, 0], time, data["grid_import_kw"], "Grid Import Usage", "KW", fig, cmap="Blues", clip_values=False)
-    plot_carpet(axes[1, 1], time, data["grid_export_kw"], "Grid Export Usage", "KW", fig, cmap="Oranges", clip_values=False)
-    plot_carpet(axes[2, 0], time, data["ev_dis_to_home_kw"], "EV Discharge to Home", "KW", fig, cmap="Greens", clip_values=False, vmin=0)
-    plot_carpet(axes[2, 1], time, ev_charge_discharge_kw, "EV Charge and Discharge", "KW", fig, cmap="coolwarm", clip_values=False, vmin=-11, vmax=30)
+    day_ahead_prices = [
+        (value - extra_costs_electricity) / mehrwertsteuer
+        for value in home_grid_price_total_eur_per_kwh
+    ]
 
-    fig.suptitle(f"Carpet Plots for {result_name}", fontsize=14, fontweight="bold")
-    plt.tight_layout()
+    best_future_profit_margins = []
+
+    for current_index, current_day_ahead_price in enumerate(day_ahead_prices):
+        end_index = min(current_index + 96, len(day_ahead_prices) - 1)
+        future_prices = day_ahead_prices[current_index + 1:end_index + 1]
+
+        if future_prices:
+            highest_future_price = max(future_prices)
+            best_future_profit_margin = (
+                highest_future_price * roundtrip_efficiency
+                - current_day_ahead_price * mehrwertsteuer
+                - threshold
+            )
+        else:
+            best_future_profit_margin = -threshold
+
+        best_future_profit_margins.append(best_future_profit_margin)
+
+    return best_future_profit_margins
+
+def plot_carpet_plots(output_folder_path):
+    cfg = EnergySystemConfig()
+    carpet_specs = [
+        ("Consumer Buy Price", "Euro/KWh", "home_grid_price_total_eur_per_kwh", "viridis", True, None, None),
+        ("EV State of Charge", "SOC [%]", "ev_soc_pct", "YlGn", False, 0, 100),
+        ("Grid Import Usage", "KW", "grid_import_kw", "Blues", False, None, None),
+        ("Grid Export Usage", "KW", "grid_export_kw", "Oranges", False, 0, 12),
+        ("EV Discharge to Home", "KW", "ev_dis_to_home_kw", "Greens", False, 0, None),
+        ("EV Charge and Discharge", "KW", "ev_charge_discharge_kw", "coolwarm", False, -12, 44),
+    ]
+
+    scenario_paths = sorted(
+        [
+            path
+            for path in Path(output_folder_path).glob("outputs_*")
+            if (path / "mpc_results.csv").exists()
+        ]
+    )
+
+    if not scenario_paths:
+        print(f"No scenario folders with mpc_results.csv found in {output_folder_path}")
+        return
+
+    def get_scenario_label(scenario_name):
+        if "0.5degcost" in scenario_name:
+            return "Noncommuter with 0.5 Battery Deg. Costs"
+        if "0deg" in scenario_name:
+            return "Noncommuter with 0 Battery Deg. Costs"
+        if "Noncommuter" in scenario_name:
+            return "Noncommuter Profile"
+        return "Commuter Profile"
+
+    carpet_spec_groups = [carpet_specs[:3], carpet_specs[3:]]
+
+    for carpet_group in carpet_spec_groups:
+        fig, axes = plt.subplots(len(carpet_group), len(scenario_paths), figsize=(16.8, 5.8), squeeze=False)
+        fig.subplots_adjust(left=0.07, right=0.95, top=0.87, bottom=0.10, wspace=0.14, hspace=0.40)
+        row_images = [None] * len(carpet_group)
+
+        for column_index, scenario_path in enumerate(scenario_paths):
+            result_path = scenario_path / "mpc_results.csv"
+            data = pd.read_csv(result_path, low_memory=False)
+            time = pd.to_datetime(data["local_time"])
+            data["ev_soc_pct"] = data["ev_energy_kwh"] / cfg.ev_cap_kwh * 100
+            data["ev_charge_discharge_kw"] = data["ev_home_ch_kw"] + data["ev_ext_ch_kw"] - data["ev_dis_to_home_kw"] - data["ev_dis_to_grid_kw"]
+
+            for row_index, (title, colorbar_label, column_name, cmap, clip_values, vmin, vmax) in enumerate(carpet_group):
+                image = plot_carpet(
+                    axes[row_index, column_index],
+                    time,
+                    data[column_name],
+                    "",
+                    colorbar_label,
+                    fig,
+                    cmap=cmap,
+                    clip_values=clip_values,
+                    vmin=vmin,
+                    vmax=vmax,
+                    show_colorbar=False,
+                )
+                row_images[row_index] = image
+
+                if column_index == 0:
+                    axes[row_index, column_index].set_ylabel("Time of day")
+                else:
+                    axes[row_index, column_index].set_ylabel("")
+
+                if row_index == len(carpet_group) - 1:
+                    axes[row_index, column_index].set_xlabel("Month")
+                else:
+                    axes[row_index, column_index].set_xlabel("")
+
+                if row_index == 0:
+                    axes[row_index, column_index].text(0.5, 1.10, scenario_path.name, ha="center", va="bottom", fontsize=6, transform=axes[row_index, column_index].transAxes)
+                    axes[row_index, column_index].text(0.5, 1.03, get_scenario_label(scenario_path.name), ha="center", va="bottom", fontsize=8, fontweight="bold", transform=axes[row_index, column_index].transAxes)
+
+        for row_index, (title, colorbar_label, _, _, _, _, _) in enumerate(carpet_group):
+            colorbar = fig.colorbar(row_images[row_index], ax=axes[row_index, :], fraction=0.015, pad=0.01)
+            colorbar.set_label(f"{title}\n{colorbar_label}")
+
+    profitability_specs = [
+        ("V2G Profitability within 24h", "Euro/KWh above break-even", "best_future_v2g_profit_margin", "coolwarm", False, None, None),
+    ]
+
+    fig, axes = plt.subplots(1, len(scenario_paths), figsize=(16.8, 2.4), squeeze=False)
+    fig.subplots_adjust(left=0.07, right=0.95, top=0.82, bottom=0.18, wspace=0.14, hspace=0.30)
+    row_images = [None]
+
+    for column_index, scenario_path in enumerate(scenario_paths):
+        result_path = scenario_path / "mpc_results.csv"
+        data = pd.read_csv(result_path, low_memory=False)
+        time = pd.to_datetime(data["local_time"])
+        data["best_future_v2g_profit_margin"] = calculate_best_future_v2g_profit_margin(
+            data["home_grid_price_total_eur_per_kwh"].tolist(),
+            scenario_path.name,
+        )
+
+        for row_index, (title, colorbar_label, column_name, cmap, clip_values, vmin, vmax) in enumerate(profitability_specs):
+            values = data[column_name]
+            max_abs_value = max(abs(values.min()), abs(values.max()))
+            profitability_cmap = plt.cm.get_cmap("viridis").copy()
+            profitability_cmap.set_under("darkgray")
+            image = plot_carpet(
+                axes[row_index, column_index],
+                time,
+                values,
+                "",
+                colorbar_label,
+                fig,
+                cmap=profitability_cmap,
+                clip_values=clip_values,
+                vmin=0,
+                vmax=max_abs_value,
+                show_colorbar=False,
+            )
+            row_images[row_index] = image
+
+            if column_index == 0:
+                axes[row_index, column_index].set_ylabel("Time of day")
+            else:
+                axes[row_index, column_index].set_ylabel("")
+
+            axes[row_index, column_index].set_xlabel("Month")
+
+            axes[row_index, column_index].text(0.5, 1.10, scenario_path.name, ha="center", va="bottom", fontsize=6, transform=axes[row_index, column_index].transAxes)
+            axes[row_index, column_index].text(0.5, 1.03, get_scenario_label(scenario_path.name), ha="center", va="bottom", fontsize=8, fontweight="bold", transform=axes[row_index, column_index].transAxes)
+
+    for row_index, (title, colorbar_label, _, _, _, _, _) in enumerate(profitability_specs):
+        colorbar = fig.colorbar(row_images[row_index], ax=axes[row_index, :], fraction=0.015, pad=0.01)
+        colorbar.set_label(f"{title}\n{colorbar_label}")
+
     plt.show()
 
     return
@@ -491,7 +643,7 @@ def plot_energy_sinks_sources(cost_and_revenue_data):
     cost_and_revenue_data["model"] = pd.Categorical(cost_and_revenue_data["model"], categories=models, ordered=True)
     cost_and_revenue_data = cost_and_revenue_data.sort_values(["scenario", "model"]).reset_index(drop=True)
     scenarios = cost_and_revenue_data["scenario"].unique()
-    scenario_labels = ["Commuter Profile", "Noncommuter Profile", "Noncommuter Profile with half the Battery Degredation Costs", "Noncommuter Profile with 0 Battery Degredation Costs"]
+    scenario_labels = ["Commuter Profile", "Noncommuter Profile", "Noncommuter with 0.5 Battery Deg. Costs", "Noncommuter with 0 Battery Deg. Costs"]
     
     x_labels = [
         row.model
@@ -627,7 +779,7 @@ def main():
     #For the Electricity Price Data
     results_data_path=("/Users/anton.atkins/Documents/TU Berlin/Bachelor Arbeit/code/New_ModelV2/Home_optimizationV2/outputs_incl_mpcdynamic/outputs_3_Tesla3_V3_79.5KWh_Noncommuter_incl_mpcdynamic_0.5degcost/mpc_results.csv")
     initial_data_path=("/Users/anton.atkins/Documents/TU Berlin/Bachelor Arbeit/code/New_ModelV2/Home_optimizationV2/data/LPG_FlexEhome_2025_Tesla3_79.5_Commuter.csv")
-    output_folder_path = "/Users/anton.atkins/Documents/TU Berlin/Bachelor Arbeit/code/New_ModelV2/Home_optimizationV2/outputs_V2_incl_mpcdynamic"
+    output_folder_path = "/Users/anton.atkins/Documents/TU Berlin/Bachelor Arbeit/code/New_ModelV2/Home_optimizationV2/outputs_incl_mpcdynamic"
 
     if choice == "1":
         data = ElectricityPriceData.from_csv(results_data_path, initial_data_path)
@@ -658,7 +810,7 @@ def main():
         plot_costs_and_revenues(costs_revenue_metrics_combined_data)
 
     elif choice == "4":
-        plot_carpet_plots(results_data_path)
+        plot_carpet_plots(output_folder_path)
 
     else:
         print("Invalid choice. Please enter 1, 2, 3 or 4.")
