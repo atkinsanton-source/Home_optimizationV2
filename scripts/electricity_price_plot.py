@@ -532,15 +532,22 @@ def plot_carpet_plots(output_folder_path):
 
 def plot_costs_and_revenues(cost_and_revenue_data):
     models = ["baseline_static", "baseline_dynamic", "mpc_static", "mpc_dynamic_v1", "mpc"]
+    model_display_labels = {
+        "baseline_static": "Static Baseline",
+        "baseline_dynamic": "Dyn. Baseline",
+        "mpc_static": "Static MPC",
+        "mpc_dynamic_v1": "Dyn. MPC v1",
+        "mpc": "Dyn. MPC",
+    }
 
     cost_and_revenue_data = cost_and_revenue_data.copy()
     cost_and_revenue_data["model"] = pd.Categorical(cost_and_revenue_data["model"], categories=models, ordered=True)
     cost_and_revenue_data = cost_and_revenue_data.sort_values(["scenario", "model"]).reset_index(drop=True)
     scenarios = cost_and_revenue_data["scenario"].unique()
-    scenario_labels = ["Commuter Profile", "Noncommuter Profile", "Noncommuter Profile with half the Battery Degredation Costs", "Noncommuter Profile with 0 Battery Degredation Costs"]
+    scenario_labels = ["Commuter Profile", "Noncommuter Profile", "Noncommuter with 0.5 Battery Deg. Costs", "Noncommuter with 0 Battery Deg. Costs"]
 
     x_labels = [
-        row.model
+        model_display_labels.get(row.model, row.model)
         for row in cost_and_revenue_data.itertuples()
     ]
 
@@ -548,11 +555,12 @@ def plot_costs_and_revenues(cost_and_revenue_data):
     workplace_charge_costs = cost_and_revenue_data["external_charge_workplace_cost_eur"].tolist()
     fast75_charge_costs = cost_and_revenue_data["external_charge_fast75_cost_eur"].tolist()
     fast150_charge_costs = cost_and_revenue_data["external_charge_fast150_cost_eur"].tolist()
+    fast_charge_costs = [a + b for a, b in zip(fast75_charge_costs, fast150_charge_costs)]
     ev_battery_degradation_costs = cost_and_revenue_data["ev_battery_degradation_cost_eur"].tolist()
     ev_home_charge_costs = cost_and_revenue_data["ev_home_charge_cost_eur"].tolist()
     home_load_costs = [a + b for a, b in zip(cost_and_revenue_data["home_load_cost_eur"].tolist(), ev_home_charge_costs)]
     ev_discharge_grid_revenues = cost_and_revenue_data["ev_discharge_grid_revenue_eur"].tolist()
-    external_charge_costs = [a + b + c + d for a, b, c, d in zip(public_charge_costs, workplace_charge_costs, fast75_charge_costs, fast150_charge_costs)]
+    external_charge_costs = [a + b + c for a, b, c in zip(public_charge_costs, workplace_charge_costs, fast_charge_costs)]
 
     model_gap = 0.12
     x = [value * (1 + model_gap) for value in range(len(x_labels))]
@@ -569,11 +577,8 @@ def plot_costs_and_revenues(cost_and_revenue_data):
     bottom_workplace_charge = [a + b for a, b in zip(home_load_costs, public_charge_costs)]
     bars_workplace_charge = ax.bar(x, workplace_charge_costs, width=width, bottom=bottom_workplace_charge, label="Workplace charge cost", color="#ffbe7d", **bar_style)
 
-    bottom_fast75_charge = [a + b for a, b in zip(bottom_workplace_charge, workplace_charge_costs)]
-    bars_fast75_charge = ax.bar(x, fast75_charge_costs, width=width, bottom=bottom_fast75_charge, label="Fast 75 charge cost", color="#d65f00", **bar_style)
-
-    bottom_fast150_charge = [a + b for a, b in zip(bottom_fast75_charge, fast75_charge_costs)]
-    bars_fast150_charge = ax.bar(x, fast150_charge_costs, width=width, bottom=bottom_fast150_charge, label="Fast 150 charge cost", color="#8c2d04", **bar_style)
+    bottom_fast_charge = [a + b for a, b in zip(bottom_workplace_charge, workplace_charge_costs)]
+    bars_fast_charge = ax.bar(x, fast_charge_costs, width=width, bottom=bottom_fast_charge, label="EV Fast Charge Cost", color="#d65f00", **bar_style)
 
     bottom_ev_battery_deg = [a + b for a, b in zip(home_load_costs, external_charge_costs)]
     bars_ev_battery_deg = ax.bar(x, ev_battery_degradation_costs, width=width, bottom=bottom_ev_battery_deg, label="EV battery degradation cost", color="#b8860b", **bar_style)
@@ -593,24 +598,26 @@ def plot_costs_and_revenues(cost_and_revenue_data):
             net_label_added = True
         else:
             ax.hlines(net_value, x_value - width / 2, x_value + width / 2, colors="#d62728", linewidth=2)
-        ax.text(x_value - width / 2 - 0.08, net_value, f"{net_value:.1f}", color="#d62728", fontsize=7.5, fontweight="bold", ha="right", va="center", bbox={"facecolor": "white", "edgecolor": "#d62728", "boxstyle": "square,pad=0.18"})
+        if net_value > 100:
+            ax.text(x_value - width / 2 - 0.08, net_value, f"{net_value:.0f}", color="#d62728", fontsize=6.5, fontweight="bold", ha="right", va="center", bbox={"facecolor": "white", "edgecolor": "#d62728", "boxstyle": "square,pad=0.10"})
 
     for x_value, total_cost in zip(x, total_costs):
-        ax.text(x_value, total_cost + 7, f"{total_cost:.1f}", color="black", fontsize=9, fontweight="bold", ha="center", va="bottom")
+        if total_cost > 100:
+            ax.text(x_value, total_cost + 7, f"{total_cost:.0f}", color="black", fontsize=9, fontweight="bold", ha="center", va="bottom")
 
     for x_value, revenue in zip(revenue_x, ev_discharge_grid_revenues):
-        ax.text(x_value, revenue + 5, f"{revenue:.1f}", color="black", fontsize=9, fontweight="bold", ha="center", va="bottom")
+        if revenue > 100:
+            ax.text(x_value, revenue + 5, f"{revenue:.0f}", color="black", fontsize=9, fontweight="bold", ha="center", va="bottom")
 
-    ax.bar_label(bars_home_load, labels=[f"{value:.1f}" if value > 0 else "" for value in home_load_costs], label_type="center", fontsize=7)
-    ax.bar_label(bars_public_charge, labels=[f"{value:.1f}" if value > 0 else "" for value in public_charge_costs], label_type="center", fontsize=7)
-    ax.bar_label(bars_workplace_charge, labels=[f"{value:.1f}" if value > 0 else "" for value in workplace_charge_costs], label_type="center", fontsize=7)
-    ax.bar_label(bars_fast75_charge, labels=[f"{value:.1f}" if value > 0 else "" for value in fast75_charge_costs], label_type="center", fontsize=7)
-    ax.bar_label(bars_fast150_charge, labels=[f"{value:.1f}" if value > 0 else "" for value in fast150_charge_costs], label_type="center", fontsize=7)
-    ax.bar_label(bars_ev_battery_deg, labels=[f"{value:.1f}" if value > 0 else "" for value in ev_battery_degradation_costs], label_type="center", fontsize=7)
-    ax.bar_label(bars_revenue, labels=[f"{value:.1f}" if value > 0 else "" for value in ev_discharge_grid_revenues], label_type="center", fontsize=7)
+    ax.bar_label(bars_home_load, labels=[f"{value:.0f}" if value > 100 else "" for value in home_load_costs], label_type="center", fontsize=7)
+    ax.bar_label(bars_public_charge, labels=[f"{value:.0f}" if value > 100 else "" for value in public_charge_costs], label_type="center", fontsize=7)
+    ax.bar_label(bars_workplace_charge, labels=[f"{value:.0f}" if value > 100 else "" for value in workplace_charge_costs], label_type="center", fontsize=7)
+    ax.bar_label(bars_fast_charge, labels=[f"{value:.0f}" if value > 100 else "" for value in fast_charge_costs], label_type="center", fontsize=7)
+    ax.bar_label(bars_ev_battery_deg, labels=[f"{value:.0f}" if value > 100 else "" for value in ev_battery_degradation_costs], label_type="center", fontsize=7)
+    ax.bar_label(bars_revenue, labels=[f"{value:.0f}" if value > 100 else "" for value in ev_discharge_grid_revenues], label_type="center", fontsize=7)
 
     ax.set_xticks([value + (width + bar_gap) / 2 for value in x])
-    ax.set_xticklabels(x_labels, fontsize=7)
+    ax.set_xticklabels(x_labels, fontsize=8, rotation=35, ha="right", rotation_mode="anchor")
     ax.set_ylabel("Operational costs / revenues (€)", fontweight="bold")
     ax.set_title("Costs and revenues (2025)")
     for scenario_index, scenario in enumerate(scenarios):
@@ -638,6 +645,13 @@ def plot_costs_and_revenues(cost_and_revenue_data):
 
 def plot_energy_sinks_sources(cost_and_revenue_data):
     models = ["baseline_static", "baseline_dynamic", "mpc_static", "mpc_dynamic_v1", "mpc"]
+    model_display_labels = {
+        "baseline_static": "Static Baseline",
+        "baseline_dynamic": "Dyn. Baseline",
+        "mpc_static": "Static MPC",
+        "mpc_dynamic_v1": "Dyn. MPC V1",
+        "mpc": "Dyn. MPC",
+    }
 
     cost_and_revenue_data = cost_and_revenue_data.copy()
     cost_and_revenue_data["model"] = pd.Categorical(cost_and_revenue_data["model"], categories=models, ordered=True)
@@ -646,7 +660,7 @@ def plot_energy_sinks_sources(cost_and_revenue_data):
     scenario_labels = ["Commuter Profile", "Noncommuter Profile", "Noncommuter with 0.5 Battery Deg. Costs", "Noncommuter with 0 Battery Deg. Costs"]
     
     x_labels = [
-        row.model
+        model_display_labels.get(row.model, row.model)
         for row in cost_and_revenue_data.itertuples()
     ]
 
@@ -654,6 +668,7 @@ def plot_energy_sinks_sources(cost_and_revenue_data):
     ev_workplace_charge_kwh = cost_and_revenue_data["external_charge_workplace_kwh"].tolist()
     ev_fast75_charge_kwh = cost_and_revenue_data["external_charge_fast75_kwh"].tolist()
     ev_fast150_charge_kwh = cost_and_revenue_data["external_charge_fast150_kwh"].tolist()
+    ev_fast_charge_kwh = [a + b for a, b in zip(ev_fast75_charge_kwh, ev_fast150_charge_kwh)]
     grid_import_kwh = cost_and_revenue_data["grid_import_kwh"].tolist()
     ev_consumption_kwh = cost_and_revenue_data["ev_consumption_kwh"].tolist()
     ev_discharge_home_kwh = cost_and_revenue_data["ev_discharge_to_home_kwh"].tolist()
@@ -662,7 +677,7 @@ def plot_energy_sinks_sources(cost_and_revenue_data):
     ev_charge_home_kwh = cost_and_revenue_data["home_ev_charge_kwh"].tolist()
     ev_initial_energy_kwh = cost_and_revenue_data["ev_initial_energy_kwh"].tolist()
     ev_final_energy_kwh = cost_and_revenue_data["ev_final_energy_kwh"].tolist()
-    ev_external_charge_kwh = [a + b + c + d for a, b, c, d in zip(ev_public_charge_kwh, ev_workplace_charge_kwh, ev_fast75_charge_kwh, ev_fast150_charge_kwh)]
+    ev_external_charge_kwh = [a + b + c for a, b, c in zip(ev_public_charge_kwh, ev_workplace_charge_kwh, ev_fast_charge_kwh)]
 
     total_ev_charged = [a + b for a, b in zip(ev_external_charge_kwh, ev_charge_home_kwh)]
     ev_charging_losses = [value * 0.08 for value in total_ev_charged]
@@ -689,11 +704,8 @@ def plot_energy_sinks_sources(cost_and_revenue_data):
     bottom_ev_workplace_charge = [a+b for a,b in zip(bottom_ev_external_charge, ev_public_charge_kwh)]
     bars_ev_workplace_charge = ax.bar(x, ev_workplace_charge_kwh, bottom=bottom_ev_workplace_charge, width=width, label="EV Workplace Charge", color="#ffbe7d", **bar_style)
 
-    bottom_ev_fast75_charge = [a+b for a,b in zip(bottom_ev_workplace_charge, ev_workplace_charge_kwh)]
-    bars_ev_fast75_charge = ax.bar(x, ev_fast75_charge_kwh, bottom=bottom_ev_fast75_charge, width=width, label="EV Fast 75 Charge", color="#d65f00", **bar_style)
-
-    bottom_ev_fast150_charge = [a+b for a,b in zip(bottom_ev_fast75_charge, ev_fast75_charge_kwh)]
-    bars_ev_fast150_charge = ax.bar(x, ev_fast150_charge_kwh, bottom=bottom_ev_fast150_charge, width=width, label="EV Fast 150 Charge", color="#8c2d04", **bar_style)
+    bottom_ev_fast_charge = [a+b for a,b in zip(bottom_ev_workplace_charge, ev_workplace_charge_kwh)]
+    bars_ev_fast_charge = ax.bar(x, ev_fast_charge_kwh, bottom=bottom_ev_fast_charge, width=width, label="EV Fast Charge", color="#d65f00", **bar_style)
 
     bottom_ev_initial_energy = [a+b for a,b in zip(grid_import_kwh, ev_external_charge_kwh)]
     bars_ev_initial_energy = ax.bar(x, ev_initial_energy_kwh, bottom=bottom_ev_initial_energy, width=width, label="EV Initial Energy", color="lightgreen", **bar_style)
@@ -724,26 +736,25 @@ def plot_energy_sinks_sources(cost_and_revenue_data):
     #Description for total energy out above the bar pair
     for x_value, total_energy_out in zip(energy_out_x, total_energy_out):
         label_x = x_value - ((width + bar_gap) / 2)
-        ax.text(label_x, total_energy_out + 7, f"{total_energy_out:.1f}", color="black", fontsize=11, fontweight="bold", ha="center", va="bottom")
+        ax.text(label_x, total_energy_out + 7, f"{total_energy_out:.0f}", color="black", fontsize=11, fontweight="bold", ha="center", va="bottom")
     
     #Plot bars
-    ax.bar_label(bars_ev_initial_energy, labels=[f"{value:.1f}" if value > 100 else "" for value in ev_initial_energy_kwh], label_type="center", fontsize=7)
-    ax.bar_label(bars_grid_import_kwh, labels=[f"{value:.1f}" if value > 100 else "" for value in grid_import_kwh], label_type="center", fontsize=7)
-    ax.bar_label(bars_ev_public_charge, labels=[f"{value:.1f}" if value > 100 else "" for value in ev_public_charge_kwh], label_type="center", fontsize=7)
-    ax.bar_label(bars_ev_workplace_charge, labels=[f"{value:.1f}" if value > 100 else "" for value in ev_workplace_charge_kwh], label_type="center", fontsize=7)
-    ax.bar_label(bars_ev_fast75_charge, labels=[f"{value:.1f}" if value > 100 else "" for value in ev_fast75_charge_kwh], label_type="center", fontsize=7)
-    ax.bar_label(bars_ev_fast150_charge, labels=[f"{value:.1f}" if value > 100 else "" for value in ev_fast150_charge_kwh], label_type="center", fontsize=7)
-    ax.bar_label(bars_home_load_kwh, labels=[f"{value:.1f}" if value > 100 else "" for value in home_load_grid_import_kwh], label_type="center", fontsize=7)
-    ax.bar_label(bars_ev_consumption_kwh, labels=[f"{value:.1f}" if value > 100 else "" for value in ev_consumption_kwh], label_type="center", fontsize=7)
-    ax.bar_label(bars_ev_discharge_home_kwh, labels=[f"{value:.1f}" if value > 100 else "" for value in ev_discharge_home_kwh], label_type="center", fontsize=7)
-    ax.bar_label(bars_ev_discharge_grid_kwh, labels=[f"{value:.1f}" if value > 100 else "" for value in ev_discharge_grid_kwh], label_type="center", fontsize=7)
-    ax.bar_label(bars_ev_charging_losses, labels=[f"{value:.1f}" if value > 100 else "" for value in ev_charging_losses], label_type="center", fontsize=7)
-    ax.bar_label(bars_ev_discharging_losses, labels=[f"{value:.1f}" if value > 100 else "" for value in ev_discharging_losses], label_type="center", fontsize=7)
-    ax.bar_label(bars_ev_final_energy, labels=[f"{value:.1f}" if value > 100 else "" for value in ev_final_energy_kwh], label_type="center", fontsize=7)
+    ax.bar_label(bars_ev_initial_energy, labels=[f"{value:.0f}" if value >= 200 else "" for value in ev_initial_energy_kwh], label_type="center", fontsize=7)
+    ax.bar_label(bars_grid_import_kwh, labels=[f"{value:.0f}" if value >= 200 else "" for value in grid_import_kwh], label_type="center", fontsize=7)
+    ax.bar_label(bars_ev_public_charge, labels=[f"{value:.0f}" if value >= 200 else "" for value in ev_public_charge_kwh], label_type="center", fontsize=7)
+    ax.bar_label(bars_ev_workplace_charge, labels=[f"{value:.0f}" if value >= 200 else "" for value in ev_workplace_charge_kwh], label_type="center", fontsize=7)
+    ax.bar_label(bars_ev_fast_charge, labels=[f"{value:.0f}" if value >= 200 else "" for value in ev_fast_charge_kwh], label_type="center", fontsize=7)
+    ax.bar_label(bars_home_load_kwh, labels=[f"{value:.0f}" if value >= 200 else "" for value in home_load_grid_import_kwh], label_type="center", fontsize=7)
+    ax.bar_label(bars_ev_consumption_kwh, labels=[f"{value:.0f}" if value >= 200 else "" for value in ev_consumption_kwh], label_type="center", fontsize=7)
+    ax.bar_label(bars_ev_discharge_home_kwh, labels=[f"{value:.0f}" if value >= 200 else "" for value in ev_discharge_home_kwh], label_type="center", fontsize=7)
+    ax.bar_label(bars_ev_discharge_grid_kwh, labels=[f"{value:.0f}" if value >= 200 else "" for value in ev_discharge_grid_kwh], label_type="center", fontsize=7)
+    ax.bar_label(bars_ev_charging_losses, labels=[f"{value:.0f}" if value >= 200 else "" for value in ev_charging_losses], label_type="center", fontsize=7)
+    ax.bar_label(bars_ev_discharging_losses, labels=[f"{value:.0f}" if value >= 200 else "" for value in ev_discharging_losses], label_type="center", fontsize=7)
+    ax.bar_label(bars_ev_final_energy, labels=[f"{value:.0f}" if value >= 200 else "" for value in ev_final_energy_kwh], label_type="center", fontsize=7)
 
     #Naming plot and adding labels
     ax.set_xticks([value + (width + bar_gap) / 2 for value in x])
-    ax.set_xticklabels(x_labels, fontsize=7)
+    ax.set_xticklabels(x_labels, fontsize=8, rotation=35, ha="right", rotation_mode="anchor")
     ax.set_ylabel("KWh", fontweight="bold")
     ax.set_title("Energy Sources and Sinks for Driver Profiles with a Tesla Model 3")
 
