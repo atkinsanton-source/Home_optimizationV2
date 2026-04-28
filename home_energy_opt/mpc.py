@@ -37,6 +37,33 @@ def _effective_ev_lb(cfg: EnergySystemConfig, reserve_kwh: float) -> float:
     return reserve_bounded
 
 
+def _take_from_split(external_kwh: float, home_kwh: float, amount_kwh: float) -> Tuple[float, float, float, float]:
+    """Consume energy from the external bucket first, then the home bucket."""
+    remaining = max(0.0, float(amount_kwh))
+    external_kwh = max(0.0, float(external_kwh))
+    home_kwh = max(0.0, float(home_kwh))
+
+    used_external = min(external_kwh, remaining)
+    remaining -= used_external
+    used_home = min(home_kwh, remaining)
+
+    return external_kwh - used_external, home_kwh - used_home, used_external, used_home
+
+
+def _scale_split_to_total(home_kwh: float, external_kwh: float, total_kwh: float) -> Tuple[float, float]:
+    """Scale the split state to a new total while keeping the existing split ratio."""
+    home_kwh = max(0.0, float(home_kwh))
+    external_kwh = max(0.0, float(external_kwh))
+    target_total = max(0.0, float(total_kwh))
+    raw_total = home_kwh + external_kwh
+    if raw_total <= 0.0:
+        return target_total, 0.0
+    if abs(raw_total - target_total) <= EV_SOC_CLAMP_EPS_KWH:
+        return home_kwh, external_kwh
+    scale = target_total / raw_total
+    return home_kwh * scale, external_kwh * scale
+
+
 @dataclass
 class MPCSolveResult:
     """Container for one MPC window solve outcome."""
@@ -61,7 +88,13 @@ class WindowDataManager:
             tail["ev_drive_kwh"] = 0.0
             # Use neutral economics for synthetic rows to reduce end-of-horizon artifacts.
             if cfg.pad_tail_neutral_prices:
-                for col in ("import_price_eur_per_kwh", "ev_ext_import_price_eur_per_kwh", "ev_export_price_eur_per_kwh"):
+                for col in (
+                    "import_price_eur_per_kwh",
+                    "ev_ext_import_price_eur_per_kwh",
+                    "ev_export_price_eur_per_kwh",
+                    "ev_home_export_price_eur_per_kwh",
+                    "ev_external_export_price_eur_per_kwh",
+                ):
                     if col in tail.columns:
                         tail[col] = float(cfg.pad_tail_price_eur_per_kwh)
             window = pd.concat([window, pd.concat([tail] * pad_rows, ignore_index=False)], axis=0)
@@ -498,11 +531,17 @@ def run_mpc_loop(
     # Runtime state of stored energy (kWh) propagated step-by-step.
     e_bat = cfg.bat_soc_init * cfg.bat_cap_kwh
     e_ev = cfg.ev_soc_init * cfg.ev_cap_kwh
+    n_steps = len(df)
+    if n_steps > 0 and str(df.iloc[0].get("ev_state", "")).strip().lower() == "home":
+        e_ev_home = e_ev
+        e_ev_external = 0.0
+    else:
+        e_ev_home = 0.0
+        e_ev_external = e_ev
 
     # `rows`: simulation outputs, `logs`: diagnostics and timings.
     logs: List[Dict[str, object]] = []
     rows: List[Dict[str, float]] = []
-    n_steps = len(df)
     ev_reserve_kwh_by_step = pd.to_numeric(df["ev_reserve_kwh"], errors="coerce").fillna(0.0).astype(float).tolist()
     t_loop_start = perf_counter()
     slowest_solve_sec = -1.0
@@ -606,6 +645,8 @@ def run_mpc_loop(
             ts_step = df.index[j]
             row = df.iloc[j]
             e_ev_start = e_ev
+            e_ev_home_start = e_ev_home
+            e_ev_external_start = e_ev_external
             e_ev_pre_clamp_start = prev_e_ev_raw
             step = (
                 block_actions[local_t]
@@ -614,6 +655,34 @@ def run_mpc_loop(
             )
 
             drive_kwh = float(row["ev_drive_kwh"])
+            drive_external_kwh = 0.0
+            drive_home_kwh = 0.0
+            e_ev_external, e_ev_home, drive_external_kwh, drive_home_kwh = _take_from_split(
+                e_ev_external,
+                e_ev_home,
+                drive_kwh,
+            )
+
+            ev_dis_to_home_kwh = float(step["ev_dis_to_home_kw"]) * cfg.dt_hours
+            ev_dis_to_grid_kwh = float(step["ev_dis_to_grid_kw"]) * cfg.dt_hours
+            dis_to_home_store_kwh = ev_dis_to_home_kwh / cfg.ev_eta_dis
+            dis_to_grid_store_kwh = ev_dis_to_grid_kwh / cfg.ev_eta_dis
+            e_ev_external, e_ev_home, dis_to_home_external_store_kwh, dis_to_home_home_store_kwh = _take_from_split(
+                e_ev_external,
+                e_ev_home,
+                dis_to_home_store_kwh,
+            )
+            e_ev_external, e_ev_home, dis_to_grid_external_store_kwh, dis_to_grid_home_store_kwh = _take_from_split(
+                e_ev_external,
+                e_ev_home,
+                dis_to_grid_store_kwh,
+            )
+
+            ev_home_charge_kwh = float(step["ev_home_ch_kw"]) * cfg.dt_hours
+            ev_ext_charge_kwh = float(step["ev_ext_ch_kw"]) * cfg.dt_hours
+            e_ev_home += cfg.ev_eta_ch * ev_home_charge_kwh
+            e_ev_external += cfg.ev_eta_ch * ev_ext_charge_kwh
+
             # Crucial state transition: previous energy + charging - discharging - driving consumption.
             e_ev_raw_next = (
                 e_ev
@@ -630,6 +699,7 @@ def run_mpc_loop(
             else:
                 ev_lb_carry = _effective_ev_lb(cfg, ev_reserve_kwh_by_step[j])
             e_ev = min(max(e_ev_raw_next, ev_lb_carry), cfg.ev_cap_kwh)
+            e_ev_home, e_ev_external = _scale_split_to_total(e_ev_home, e_ev_external, e_ev)
             # Clamp diagnostics are reported as start-of-step quantities:
             # compare current clamped start state vs previous step raw carry-over.
             ev_soc_clamp_delta_kwh = e_ev_start - e_ev_pre_clamp_start
@@ -643,12 +713,20 @@ def run_mpc_loop(
                 {
                     "bat_energy_kwh": e_bat,
                     "ev_energy_kwh": e_ev_start,
+                    "ev_home_energy_kwh": e_ev_home_start,
+                    "ev_external_energy_kwh": e_ev_external_start,
                     "ev_energy_pre_clamp_kwh": e_ev_pre_clamp_start,
                     "ev_soc_clamped": ev_soc_clamped,
                     "ev_soc_clamp_delta_kwh": ev_soc_clamp_delta_kwh,
                     "ev_soc_clamped_after_fallback": ev_soc_clamped_after_fallback,
                     "ev_soc_clamp_after_fallback_delta_kwh": ev_soc_clamp_delta_kwh if ev_soc_clamped_after_fallback > 0.5 else 0.0,
                     "ev_consumption_kwh": drive_kwh,
+                    "ev_drive_external_kwh": drive_external_kwh,
+                    "ev_drive_home_kwh": drive_home_kwh,
+                    "ev_dis_to_home_external_kwh": dis_to_home_external_store_kwh * cfg.ev_eta_dis,
+                    "ev_dis_to_home_home_kwh": dis_to_home_home_store_kwh * cfg.ev_eta_dis,
+                    "ev_dis_to_grid_external_kwh": dis_to_grid_external_store_kwh * cfg.ev_eta_dis,
+                    "ev_dis_to_grid_home_kwh": dis_to_grid_home_store_kwh * cfg.ev_eta_dis,
                     "solver_status": status,
                     "used_fallback": float(used_fallback),
                 }
@@ -723,10 +801,19 @@ def run_mpc_loop(
     out["home_load_grid_import_kwh"] = out[["grid_import_kwh", "home_load_kwh"]].min(axis=1)
     out["ev_home_charge_cost_eur"] = df["import_price_eur_per_kwh"] * out["ev_home_ch_kwh"]
     out["home_load_cost_eur"] = df["import_price_eur_per_kwh"] * out["home_load_grid_import_kwh"]
-    out["ev_discharge_grid_revenue_eur"] = df["ev_export_price_eur_per_kwh"] * out["ev_dis_to_grid_kwh"]
+    out["ev_home_export_price_eur_per_kwh"] = df["ev_home_export_price_eur_per_kwh"]
+    out["ev_external_export_price_eur_per_kwh"] = df["ev_external_export_price_eur_per_kwh"]
+    out["ev_export_price_eur_per_kwh"] = df["ev_export_price_eur_per_kwh"]
+    out["ev_discharge_grid_revenue_home_eur"] = df["ev_home_export_price_eur_per_kwh"] * out["ev_dis_to_grid_home_kwh"]
+    out["ev_discharge_grid_revenue_external_eur"] = (
+        df["ev_external_export_price_eur_per_kwh"] * out["ev_dis_to_grid_external_kwh"]
+    )
+    out["ev_discharge_grid_revenue_eur"] = (
+        out["ev_discharge_grid_revenue_home_eur"] + out["ev_discharge_grid_revenue_external_eur"]
+    )
     out["step_cost_eur"] = (
         df["import_price_eur_per_kwh"] * out["grid_import_kwh"]
-        - df["ev_export_price_eur_per_kwh"] * out["grid_export_kwh"]
+        - out["ev_discharge_grid_revenue_eur"]
         + out["ext_charge_cost_eur"]
         + out["ev_battery_degradation_cost_eur"]
     )

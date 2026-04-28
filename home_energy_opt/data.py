@@ -177,10 +177,13 @@ def preprocess(df: pd.DataFrame, cfg: EnergySystemConfig) -> pd.DataFrame:
         export_base = pd.Series(cfg.export_price_eur_per_kwh, index=out.index, dtype="float64")
     cp_export_add = charging_point_effective.map(cfg.ev_cp_export_price_adder_eur_per_kwh).fillna(0.0).astype(float)
     cp_export_sub = charging_point_effective.map(cfg.ev_cp_export_price_deduction_eur_per_kwh).fillna(0.0).astype(float)
-    out["ev_export_price_eur_per_kwh"] = (
-        export_base + cfg.export_price_adder_eur_per_kwh - cfg.export_price_deduction_eur_per_kwh + cp_export_add - cp_export_sub
-    )
+    export_base = pd.Series(export_base, index=out.index, dtype="float64") - cfg.export_price_deduction_eur_per_kwh + cp_export_add - cp_export_sub
+    out["ev_home_export_price_eur_per_kwh"] = export_base + cfg.export_price_adder_eur_per_kwh
+    out["ev_external_export_price_eur_per_kwh"] = export_base
+    out["ev_export_price_eur_per_kwh"] = out["ev_home_export_price_eur_per_kwh"]
     if not cfg.enable_grid_export:
+        out["ev_home_export_price_eur_per_kwh"] = 0.0
+        out["ev_external_export_price_eur_per_kwh"] = 0.0
         out["ev_export_price_eur_per_kwh"] = 0.0
 
     # Compatibility hooks reused in existing result processing.

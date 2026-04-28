@@ -31,7 +31,7 @@ def _default_ev_cp_import_price_fixed_eur_per_kwh() -> Dict[str, float]:
     return {
         "home": 0.0,
     "public": 0.45,
-    "workplace": 0.30,
+    "workplace": 0.0,
     "fast75": 0.59,
     "fast150": 0.69,
     "none": 0.0,
@@ -116,7 +116,7 @@ class EnergySystemConfig:
     # Extension hooks
     enable_battery_degradation_cost: bool = False
     battery_degradation_eur_per_kwh: float = 0.0
-    ev_degradation_eur_per_kwh_charged: float = 0.067
+    ev_degradation_eur_per_kwh_charged: float = 0.067*0
 
     def __post_init__(self) -> None:
         if self.apply_version_preset:

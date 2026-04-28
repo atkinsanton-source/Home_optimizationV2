@@ -38,6 +38,11 @@ def summarize_metrics(inp: pd.DataFrame, sim: pd.DataFrame, cfg: EnergySystemCon
             vals = vals.where(vals > eps, 0.0)
         return float(vals.sum())
 
+    def _series_or_zero(df: pd.DataFrame, col: str) -> pd.Series:
+        if col not in df.columns:
+            return pd.Series(0.0, index=df.index, dtype="float64")
+        return pd.to_numeric(df[col], errors="coerce").fillna(0.0)
+
     def _sum_by_charging_point(df: pd.DataFrame, value_col: str, charging_point: str) -> float:
         if "charging_point_effective" not in df.columns or value_col not in df.columns:
             return 0.0
@@ -58,16 +63,24 @@ def summarize_metrics(inp: pd.DataFrame, sim: pd.DataFrame, cfg: EnergySystemCon
         "home_load_kwh": _sum_col(sim, "home_load_kwh"),
         "ev_initial_energy_kwh": _first_col(sim, "ev_energy_kwh"),
         "ev_final_energy_kwh": _last_col(sim, "ev_energy_kwh"),
+        "ev_home_initial_energy_kwh": _first_col(sim, "ev_home_energy_kwh"),
+        "ev_home_final_energy_kwh": _last_col(sim, "ev_home_energy_kwh"),
+        "ev_external_initial_energy_kwh": _first_col(sim, "ev_external_energy_kwh"),
+        "ev_external_final_energy_kwh": _last_col(sim, "ev_external_energy_kwh"),
         "external_charge_kwh": _sum_col(sim, "ev_ext_ch_kwh"),
         "external_charge_cost_eur": _sum_col(sim, "ext_charge_cost_eur"),
         "ev_battery_degradation_cost_eur": _sum_col(sim, "ev_battery_degradation_cost_eur"),
         "home_ev_charge_kwh": _sum_col(sim, "ev_home_ch_kwh"),
         "ev_home_charge_cost_eur": _sum_col(sim, "ev_home_charge_cost_eur"),
         "home_load_cost_eur": _sum_col(sim, "home_load_cost_eur"),
+        "ev_discharge_grid_revenue_home_eur": _sum_col(sim, "ev_discharge_grid_revenue_home_eur"),
+        "ev_discharge_grid_revenue_external_eur": _sum_col(sim, "ev_discharge_grid_revenue_external_eur"),
         "ev_discharge_grid_revenue_eur": _sum_col(sim, "ev_discharge_grid_revenue_eur"),
         "home_load_grid_import_kwh": _sum_col(sim, "home_load_grid_import_kwh"),
         "ev_discharge_to_home_kwh": _sum_col(sim, "ev_dis_to_home_kwh"),
         "ev_discharge_to_grid_kwh": _sum_col(sim, "ev_dis_to_grid_kwh"),
+        "ev_drive_external_kwh": _sum_col(sim, "ev_drive_external_kwh"),
+        "ev_drive_home_kwh": _sum_col(sim, "ev_drive_home_kwh"),
         "reserve_clamp_events": int(_sum_col(inp, "ev_reserve_clamped")),
         "solver_fallback_steps": int(_sum_col(sim, "used_fallback")),
         "ev_soc_clamp_steps": int(_sum_col(sim, "ev_soc_clamped")),
@@ -86,6 +99,11 @@ def summarize_metrics(inp: pd.DataFrame, sim: pd.DataFrame, cfg: EnergySystemCon
         ),
         "ev_soc_violations_fixed_reserve": int(
             ((sim["ev_energy_kwh"] < cfg.ev_soc_min * cfg.ev_cap_kwh) | (sim["ev_energy_kwh"] > cfg.ev_cap_kwh)).sum()
+        ),
+        "ev_split_balance_violations": int(
+            ((_series_or_zero(sim, "ev_home_energy_kwh") + _series_or_zero(sim, "ev_external_energy_kwh") - _series_or_zero(sim, "ev_energy_kwh")).abs().gt(EV_SOC_CLAMP_EPS_KWH)).sum()
+            if {"ev_home_energy_kwh", "ev_external_energy_kwh"}.issubset(sim.columns)
+            else 0
         ),
     }
 
