@@ -121,8 +121,8 @@ def _split_battery_sanity_check(sim, cfg, label: str):
         "ev_home_energy_kwh",
         "ev_external_energy_kwh",
         "ev_consumption_kwh",
-        "ev_drive_external_kwh",
         "ev_drive_home_kwh",
+        "ev_drive_external_kwh",
         "ev_dis_to_home_kwh",
         "ev_dis_to_grid_kwh",
         "ev_dis_to_home_external_kwh",
@@ -150,30 +150,16 @@ def _split_battery_sanity_check(sim, cfg, label: str):
     drive = pd.to_numeric(sim["ev_consumption_kwh"], errors="coerce").fillna(0.0)
     drive_external = pd.to_numeric(sim["ev_drive_external_kwh"], errors="coerce").fillna(0.0)
     drive_home = pd.to_numeric(sim["ev_drive_home_kwh"], errors="coerce").fillna(0.0)
-    expected_drive_external = drive.clip(upper=external)
-    expected_drive_home = drive - expected_drive_external
-    drive_external_error_kwh = drive_external - expected_drive_external
-    drive_home_error_kwh = drive_home - expected_drive_home
+    drive_split_error_kwh = (drive_home + drive_external) - drive
 
     dis_home = pd.to_numeric(sim["ev_dis_to_home_kwh"], errors="coerce").fillna(0.0)
     dis_grid = pd.to_numeric(sim["ev_dis_to_grid_kwh"], errors="coerce").fillna(0.0)
-    eta_dis = float(cfg.ev_eta_dis)
-    dis_home_store = dis_home / eta_dis
-    dis_grid_store = dis_grid / eta_dis
-
-    remaining_external = external - expected_drive_external
-    remaining_home = home - expected_drive_home
-    expected_dis_home_external_store = remaining_external.clip(upper=dis_home_store)
-    expected_dis_home_home_store = dis_home_store - expected_dis_home_external_store
-    remaining_external_after_home = remaining_external - expected_dis_home_external_store
-    remaining_home_after_home = remaining_home - expected_dis_home_home_store
-    expected_dis_grid_external_store = remaining_external_after_home.clip(upper=dis_grid_store)
-    expected_dis_grid_home_store = dis_grid_store - expected_dis_grid_external_store
-
-    dis_home_external_error_kwh = pd.to_numeric(sim["ev_dis_to_home_external_kwh"], errors="coerce").fillna(0.0) - expected_dis_home_external_store * eta_dis
-    dis_home_home_error_kwh = pd.to_numeric(sim["ev_dis_to_home_home_kwh"], errors="coerce").fillna(0.0) - expected_dis_home_home_store * eta_dis
-    dis_grid_external_error_kwh = pd.to_numeric(sim["ev_dis_to_grid_external_kwh"], errors="coerce").fillna(0.0) - expected_dis_grid_external_store * eta_dis
-    dis_grid_home_error_kwh = pd.to_numeric(sim["ev_dis_to_grid_home_kwh"], errors="coerce").fillna(0.0) - expected_dis_grid_home_store * eta_dis
+    dis_home_external = pd.to_numeric(sim["ev_dis_to_home_external_kwh"], errors="coerce").fillna(0.0)
+    dis_home_home = pd.to_numeric(sim["ev_dis_to_home_home_kwh"], errors="coerce").fillna(0.0)
+    dis_grid_external = pd.to_numeric(sim["ev_dis_to_grid_external_kwh"], errors="coerce").fillna(0.0)
+    dis_grid_home = pd.to_numeric(sim["ev_dis_to_grid_home_kwh"], errors="coerce").fillna(0.0)
+    dis_home_split_error_kwh = (dis_home_external + dis_home_home) - dis_home
+    dis_grid_split_error_kwh = (dis_grid_external + dis_grid_home) - dis_grid
 
     revenue_expected = (
         pd.to_numeric(sim["ev_home_export_price_eur_per_kwh"], errors="coerce").fillna(0.0) * pd.to_numeric(
@@ -188,7 +174,7 @@ def _split_battery_sanity_check(sim, cfg, label: str):
     total_under_zero_kwh = -total_split
     violation_mask = (
         split_balance_kwh.abs() > sanity_eps
-    ) | (total_over_cap_kwh > sanity_eps) | (total_under_zero_kwh > sanity_eps) | (drive_external_error_kwh.abs() > sanity_eps) | (drive_home_error_kwh.abs() > sanity_eps) | (dis_home_external_error_kwh.abs() > sanity_eps) | (dis_home_home_error_kwh.abs() > sanity_eps) | (dis_grid_external_error_kwh.abs() > sanity_eps) | (dis_grid_home_error_kwh.abs() > sanity_eps) | (revenue_error_eur.abs() > sanity_eps)
+    ) | (total_over_cap_kwh > sanity_eps) | (total_under_zero_kwh > sanity_eps) | (home < -sanity_eps) | (external < -sanity_eps) | (drive_split_error_kwh.abs() > sanity_eps) | (dis_home_split_error_kwh.abs() > sanity_eps) | (dis_grid_split_error_kwh.abs() > sanity_eps) | (revenue_error_eur.abs() > sanity_eps)
 
     violations_df = pd.DataFrame(
         {
@@ -196,12 +182,9 @@ def _split_battery_sanity_check(sim, cfg, label: str):
             "ev_home_energy_kwh": home,
             "ev_external_energy_kwh": external,
             "split_balance_kwh": split_balance_kwh,
-            "drive_external_error_kwh": drive_external_error_kwh,
-            "drive_home_error_kwh": drive_home_error_kwh,
-            "dis_to_home_external_error_kwh": dis_home_external_error_kwh,
-            "dis_to_home_home_error_kwh": dis_home_home_error_kwh,
-            "dis_to_grid_external_error_kwh": dis_grid_external_error_kwh,
-            "dis_to_grid_home_error_kwh": dis_grid_home_error_kwh,
+            "drive_split_error_kwh": drive_split_error_kwh,
+            "dis_to_home_split_error_kwh": dis_home_split_error_kwh,
+            "dis_to_grid_split_error_kwh": dis_grid_split_error_kwh,
             "revenue_error_eur": revenue_error_eur,
         },
         index=sim.index,
@@ -217,6 +200,47 @@ def _split_battery_sanity_check(sim, cfg, label: str):
         flush=True,
     )
     return violations_df, int(violation_mask.sum()), max_split_error_kwh
+
+
+def _home_first_drive_rows(sim):
+    import pandas as pd
+
+    required_cols = {
+        "ev_home_energy_kwh",
+        "ev_external_energy_kwh",
+        "ev_consumption_kwh",
+        "ev_drive_home_kwh",
+        "ev_drive_external_kwh",
+    }
+    missing = sorted(c for c in required_cols if c not in sim.columns)
+    if missing:
+        empty = pd.DataFrame(index=sim.index)
+        print(f"[sanity] home-first drive report skipped, missing columns: {missing}", flush=True)
+        return empty
+
+    home = pd.to_numeric(sim["ev_home_energy_kwh"], errors="coerce").fillna(0.0)
+    external = pd.to_numeric(sim["ev_external_energy_kwh"], errors="coerce").fillna(0.0)
+    drive_home = pd.to_numeric(sim["ev_drive_home_kwh"], errors="coerce").fillna(0.0)
+    drive_external = pd.to_numeric(sim["ev_drive_external_kwh"], errors="coerce").fillna(0.0)
+    drive_total = pd.to_numeric(sim["ev_consumption_kwh"], errors="coerce").fillna(0.0)
+
+    eps = 1e-6
+    mask = (drive_home > eps) & (external > drive_external + eps)
+    rows = sim.loc[mask, [
+        "ev_energy_kwh",
+        "ev_home_energy_kwh",
+        "ev_external_energy_kwh",
+        "ev_consumption_kwh",
+        "ev_drive_home_kwh",
+        "ev_drive_external_kwh",
+        "solver_status",
+        "used_fallback",
+    ]].copy()
+    if not rows.empty:
+        rows["external_remaining_after_drive_kwh"] = external.loc[mask] - drive_external.loc[mask]
+        rows["drive_split_check_kwh"] = (drive_home.loc[mask] + drive_external.loc[mask]) - drive_total.loc[mask]
+    rows.index.name = "timestamp"
+    return rows
 
 
 def main() -> None:
@@ -280,9 +304,9 @@ def main() -> None:
     static_mpc_price = float(cfg_mpc_static.static_mpc_import_price_eur_per_kwh)
     data_mpc_static["import_price_eur_per_kwh"] = static_mpc_price
     data_mpc_static["ev_home_import_price_eur_per_kwh"] = static_mpc_price
-    data_mpc_static["ev_export_price_eur_per_kwh"] = 0.0
     data_mpc_static["ev_home_export_price_eur_per_kwh"] = 0.0
     data_mpc_static["ev_external_export_price_eur_per_kwh"] = 0.0
+    data_mpc_static["ev_export_price_eur_per_kwh"] = 0.0
     print(f"[stage] Preprocessing data done in {perf_counter() - t_stage:.2f}s", flush=True)
 
     # 3) Run both rule-based baseline variants (dynamic/static home import tariff).
@@ -389,6 +413,13 @@ def main() -> None:
     split_sanity_violations_static_df, split_sanity_violation_static_steps, split_sanity_max_error_static_kwh = _split_battery_sanity_check(
         mpc_static, cfg_mpc_static, "mpc_static"
     )
+    home_first_drive_rows = _home_first_drive_rows(mpc)
+    home_first_drive_count = int(len(home_first_drive_rows))
+    if home_first_drive_count > 0:
+        print(f"[sanity] home-first drive rows: {home_first_drive_count}", flush=True)
+        print(home_first_drive_rows.head(20).to_string(), flush=True)
+    else:
+        print("[sanity] home-first drive rows: 0", flush=True)
 
     # 6) Persist raw simulation outputs so they can be inspected later.
     t_stage = perf_counter()
@@ -412,6 +443,7 @@ def main() -> None:
     split_sanity_violations_df.to_csv(outdir / "mpc_split_sanity_violations.csv")
     split_sanity_violations_dynamic_v1_df.to_csv(outdir / "mpc_dynamic_v1_split_sanity_violations.csv")
     split_sanity_violations_static_df.to_csv(outdir / "mpc_static_split_sanity_violations.csv")
+    home_first_drive_rows.to_csv(outdir / "mpc_home_first_drive_rows.csv")
 
     # Detect simultaneous opposite flows from the already-solved MPC trajectory.
     grid_mask = _overlap_mask(mpc["grid_import_kw"], mpc["grid_export_kw"])
@@ -459,10 +491,13 @@ def main() -> None:
     metrics_mpc_static[sanity_max_deficit_key] = sanity_max_deficit_static_kwh
     metrics_mpc["mpc_split_sanity_violation_steps"] = float(split_sanity_violation_steps)
     metrics_mpc["mpc_split_sanity_max_error_kwh"] = split_sanity_max_error_kwh
+    metrics_mpc["mpc_home_first_drive_rows"] = float(home_first_drive_count)
     metrics_mpc_dynamic_v1["mpc_split_sanity_violation_steps"] = float(split_sanity_violation_dynamic_v1_steps)
     metrics_mpc_dynamic_v1["mpc_split_sanity_max_error_kwh"] = split_sanity_max_error_dynamic_v1_kwh
     metrics_mpc_static["mpc_split_sanity_violation_steps"] = float(split_sanity_violation_static_steps)
     metrics_mpc_static["mpc_split_sanity_max_error_kwh"] = split_sanity_max_error_static_kwh
+    metrics_mpc_dynamic_v1["mpc_home_first_drive_rows"] = 0.0
+    metrics_mpc_static["mpc_home_first_drive_rows"] = 0.0
     metrics = pd.DataFrame(
         [metrics_baseline_static, metrics_baseline_dynamic, metrics_mpc_static, metrics_mpc_dynamic_v1, metrics_mpc],
         index=["baseline_static", "baseline_dynamic", "mpc_static", "mpc_dynamic_v1", "mpc"],
@@ -505,6 +540,7 @@ def main() -> None:
     print(f"mpc_split_violations: {int(split_sanity_violation_steps)}")
     print(f"mpc_dynamic_v1_split_violations: {int(split_sanity_violation_dynamic_v1_steps)}")
     print(f"mpc_static_split_violations: {int(split_sanity_violation_static_steps)}")
+    print(f"mpc_home_first_drive_rows: {home_first_drive_count}")
     print(f"windows file: {(outdir / 'simultaneous_flow_windows.csv').resolve()}")
     print(f"\nTotal runtime: {perf_counter() - t0:.2f}s")
     print(f"\nOutputs written to: {outdir.resolve()}")

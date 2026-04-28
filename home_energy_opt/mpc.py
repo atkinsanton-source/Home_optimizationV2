@@ -11,8 +11,6 @@ from home_energy_opt.config import EnergySystemConfig
 _GUROBI_API: Optional[Dict[str, Any]] = None
 # Treat smaller clamp deltas as pure floating-point noise.
 EV_SOC_CLAMP_EPS_KWH = 1e-5
-
-
 def _load_gurobi_api() -> Dict[str, Any]:
     """Lazy-load gurobipy once and cache references for fast reuse."""
     global _GUROBI_API
@@ -37,21 +35,8 @@ def _effective_ev_lb(cfg: EnergySystemConfig, reserve_kwh: float) -> float:
     return reserve_bounded
 
 
-def _take_from_split(external_kwh: float, home_kwh: float, amount_kwh: float) -> Tuple[float, float, float, float]:
-    """Consume energy from the external bucket first, then the home bucket."""
-    remaining = max(0.0, float(amount_kwh))
-    external_kwh = max(0.0, float(external_kwh))
-    home_kwh = max(0.0, float(home_kwh))
-
-    used_external = min(external_kwh, remaining)
-    remaining -= used_external
-    used_home = min(home_kwh, remaining)
-
-    return external_kwh - used_external, home_kwh - used_home, used_external, used_home
-
-
 def _scale_split_to_total(home_kwh: float, external_kwh: float, total_kwh: float) -> Tuple[float, float]:
-    """Scale the split state to a new total while keeping the existing split ratio."""
+    """Scale a split state pair to a new total while keeping the split ratio."""
     home_kwh = max(0.0, float(home_kwh))
     external_kwh = max(0.0, float(external_kwh))
     target_total = max(0.0, float(total_kwh))
@@ -119,7 +104,8 @@ class WindowDataManager:
             "ev_p_dis_grid_max_kw": window["ev_p_dis_grid_max_kw"].astype(float).tolist(),
             "ev_p_dis_total_max_kw": window["ev_p_dis_total_max_kw"].astype(float).tolist(),
             "ev_ext_import_price": window["ev_ext_import_price_eur_per_kwh"].astype(float).tolist(),
-            "ev_export_price": window["ev_export_price_eur_per_kwh"].astype(float).tolist(),
+            "ev_home_export_price": window["ev_home_export_price_eur_per_kwh"].astype(float).tolist(),
+            "ev_external_export_price": window["ev_external_export_price_eur_per_kwh"].astype(float).tolist(),
         }
 
 
@@ -182,8 +168,31 @@ class PersistentMPCSolver:
             "p_ev_ext_ch": self._add_optional_var(self.has_ev_ext_ch, "p_ev_ext_ch", cfg.max_ev_external_charge_kw),
             "p_ev_dis_house": self._add_optional_var(self.has_ev_dis_house, "p_ev_dis_house", cfg.max_ev_discharge_house_kw),
             "p_ev_dis_grid": self._add_optional_var(self.has_ev_dis_grid, "p_ev_dis_grid", cfg.max_ev_discharge_grid_kw),
+            "p_ev_dis_house_home": self._add_optional_var(
+                self.has_ev_dis_house,
+                "p_ev_dis_house_home",
+                cfg.max_ev_discharge_house_kw,
+            ),
+            "p_ev_dis_house_ext": self._add_optional_var(
+                self.has_ev_dis_house,
+                "p_ev_dis_house_ext",
+                cfg.max_ev_discharge_house_kw,
+            ),
+            "p_ev_dis_grid_home": self._add_optional_var(
+                self.has_ev_dis_grid,
+                "p_ev_dis_grid_home",
+                cfg.max_ev_discharge_grid_kw,
+            ),
+            "p_ev_dis_grid_ext": self._add_optional_var(
+                self.has_ev_dis_grid,
+                "p_ev_dis_grid_ext",
+                cfg.max_ev_discharge_grid_kw,
+            ),
+            "p_ev_drive_home": m.addVars(T, lb=0.0, ub=cfg.ev_cap_kwh, name="p_ev_drive_home"),
+            "p_ev_drive_ext": m.addVars(T, lb=0.0, ub=cfg.ev_cap_kwh, name="p_ev_drive_ext"),
             "y_ev_mode": None,
-            "E_ev": m.addVars(Te, lb=0.0, ub=cfg.ev_cap_kwh, name="E_ev"),
+            "E_ev_home": m.addVars(Te, lb=0.0, ub=cfg.ev_cap_kwh, name="E_ev_home"),
+            "E_ev_external": m.addVars(Te, lb=0.0, ub=cfg.ev_cap_kwh, name="E_ev_external"),
         }
 
         has_charge = self.has_ev_home_ch or self.has_ev_ext_ch
@@ -193,13 +202,25 @@ class PersistentMPCSolver:
             self.vars["y_ev_mode"] = m.addVars(T, vtype=self.GRB.BINARY, name="y_ev_mode")
 
         self.constrs: Dict[str, Any] = {
-            "c_init_ev": m.addConstr(self.vars["E_ev"][0] == 0.0, name="c_init_ev"),
+            "c_init_ev_home": m.addConstr(self.vars["E_ev_home"][0] == 0.0, name="c_init_ev_home"),
+            "c_init_ev_external": m.addConstr(self.vars["E_ev_external"][0] == 0.0, name="c_init_ev_external"),
             "c_home_balance": {},
-            "c_ev_dyn": {},
+            "c_drive_split": {},
+            "c_ev_home_dyn": {},
+            "c_ev_external_dyn": {},
             "c_ev_lb": {},
+            "c_ev_cap": {},
             "c_export_link": {},
             "c_ev_ch_total": {},
             "c_ev_dis_total": {},
+            "c_ev_house_split": {},
+            "c_ev_grid_split": {},
+            "c_drive_ext_bound": {},
+            "c_drive_home_bound": {},
+            "c_house_home_bound": {},
+            "c_house_ext_bound": {},
+            "c_grid_home_bound": {},
+            "c_grid_ext_bound": {},
         }
 
         for t in T:
@@ -209,10 +230,18 @@ class PersistentMPCSolver:
             p_ev_ext_ch = self.vars["p_ev_ext_ch"][t] if self.vars["p_ev_ext_ch"] is not None else 0.0
             p_ev_dis_grid = self.vars["p_ev_dis_grid"][t] if self.vars["p_ev_dis_grid"] is not None else 0.0
             p_grid_export = self.vars["p_grid_export"][t] if self.vars["p_grid_export"] is not None else 0.0
+            p_ev_dis_house_home = self.vars["p_ev_dis_house_home"][t] if self.vars["p_ev_dis_house_home"] is not None else 0.0
+            p_ev_dis_house_ext = self.vars["p_ev_dis_house_ext"][t] if self.vars["p_ev_dis_house_ext"] is not None else 0.0
+            p_ev_dis_grid_home = self.vars["p_ev_dis_grid_home"][t] if self.vars["p_ev_dis_grid_home"] is not None else 0.0
+            p_ev_dis_grid_ext = self.vars["p_ev_dis_grid_ext"][t] if self.vars["p_ev_dis_grid_ext"] is not None else 0.0
+            p_drive_home = self.vars["p_ev_drive_home"][t]
+            p_drive_ext = self.vars["p_ev_drive_ext"][t]
+            e_home = self.vars["E_ev_home"][t]
+            e_ext = self.vars["E_ev_external"][t]
+            e_home_next = self.vars["E_ev_home"][t + 1]
+            e_ext_next = self.vars["E_ev_external"][t + 1]
 
             # Crucial physics: home-side power must balance at each timestep.
-            # External charging is intentionally handled outside the home-side balance.
-            #the equation is later set equal to the load kw in that timestep
             self.constrs["c_home_balance"][t] = m.addConstr(
                 p_grid_import + p_ev_dis_house - p_ev_home_ch == 0.0,
                 name=f"c_home_balance_{t}",
@@ -224,25 +253,68 @@ class PersistentMPCSolver:
                     p_grid_export == p_ev_dis_grid,
                     name=f"c_export_link_{t}",
                 )
+            if self.vars["p_ev_dis_house_home"] is not None and self.vars["p_ev_dis_house_ext"] is not None:
+                self.constrs["c_ev_house_split"][t] = m.addConstr(
+                    p_ev_dis_house == p_ev_dis_house_home + p_ev_dis_house_ext,
+                    name=f"c_ev_house_split_{t}",
+                )
+                self.constrs["c_house_home_bound"][t] = m.addConstr(
+                    p_ev_dis_house_home <= e_home * cfg.ev_eta_dis / cfg.dt_hours,
+                    name=f"c_house_home_bound_{t}",
+                )
+                self.constrs["c_house_ext_bound"][t] = m.addConstr(
+                    p_ev_dis_house_ext <= e_ext * cfg.ev_eta_dis / cfg.dt_hours,
+                    name=f"c_house_ext_bound_{t}",
+                )
+            if self.vars["p_ev_dis_grid_home"] is not None and self.vars["p_ev_dis_grid_ext"] is not None:
+                self.constrs["c_ev_grid_split"][t] = m.addConstr(
+                    p_ev_dis_grid == p_ev_dis_grid_home + p_ev_dis_grid_ext,
+                    name=f"c_ev_grid_split_{t}",
+                )
+                self.constrs["c_grid_home_bound"][t] = m.addConstr(
+                    p_ev_dis_grid_home <= e_home * cfg.ev_eta_dis / cfg.dt_hours,
+                    name=f"c_grid_home_bound_{t}",
+                )
+                self.constrs["c_grid_ext_bound"][t] = m.addConstr(
+                    p_ev_dis_grid_ext <= e_ext * cfg.ev_eta_dis / cfg.dt_hours,
+                    name=f"c_grid_ext_bound_{t}",
+                )
             if self.vars["p_ev_home_ch"] is not None and self.vars["p_ev_ext_ch"] is not None:
                 # Combined EV charging cannot exceed active charging-point capability.
                 self.constrs["c_ev_ch_total"][t] = m.addConstr(
-                    p_ev_home_ch + p_ev_ext_ch <= 0.0,
+                    p_ev_home_ch + p_ev_ext_ch <= cfg.ev_cap_kwh,
                     name=f"c_ev_ch_total_{t}",
                 )
             if self.vars["p_ev_dis_house"] is not None and self.vars["p_ev_dis_grid"] is not None:
                 # Combined EV discharging cannot exceed active discharge capability.
                 self.constrs["c_ev_dis_total"][t] = m.addConstr(
-                    p_ev_dis_house + p_ev_dis_grid <= 0.0,
+                    p_ev_dis_house + p_ev_dis_grid <= cfg.ev_cap_kwh,
                     name=f"c_ev_dis_total_{t}",
                 )
+            self.constrs["c_drive_split"][t] = m.addConstr(
+                p_drive_home + p_drive_ext == 0.0,
+                name=f"c_drive_split_{t}",
+            )
+            self.constrs["c_drive_ext_bound"][t] = m.addConstr(
+                p_drive_ext <= e_ext,
+                name=f"c_drive_ext_bound_{t}",
+            )
+            self.constrs["c_drive_home_bound"][t] = m.addConstr(
+                p_drive_home <= e_home,
+                name=f"c_drive_home_bound_{t}",
+            )
 
-            charge_term = cfg.ev_eta_ch * (p_ev_home_ch + p_ev_ext_ch)
-            discharge_term = (1.0 / cfg.ev_eta_dis) * (p_ev_dis_house + p_ev_dis_grid)
-            # Crucial state transition equation for EV energy.
-            self.constrs["c_ev_dyn"][t] = m.addConstr(
-                self.vars["E_ev"][t + 1] == self.vars["E_ev"][t] + (charge_term - discharge_term) * cfg.dt_hours,
-                name=f"c_ev_dyn_{t}",
+            charge_term_home = cfg.ev_eta_ch * p_ev_home_ch
+            charge_term_ext = cfg.ev_eta_ch * p_ev_ext_ch
+            discharge_term_home = (1.0 / cfg.ev_eta_dis) * (p_ev_dis_house_home + p_ev_dis_grid_home)
+            discharge_term_ext = (1.0 / cfg.ev_eta_dis) * (p_ev_dis_house_ext + p_ev_dis_grid_ext)
+            self.constrs["c_ev_home_dyn"][t] = m.addConstr(
+                e_home_next == e_home + (charge_term_home - discharge_term_home) * cfg.dt_hours - p_drive_home,
+                name=f"c_ev_home_dyn_{t}",
+            )
+            self.constrs["c_ev_external_dyn"][t] = m.addConstr(
+                e_ext_next == e_ext + (charge_term_ext - discharge_term_ext) * cfg.dt_hours - p_drive_ext,
+                name=f"c_ev_external_dyn_{t}",
             )
 
             if self.vars["y_grid_dir"] is not None and self.vars["p_grid_export"] is not None:
@@ -281,13 +353,20 @@ class PersistentMPCSolver:
                     )
 
         for t in Te:
-            self.constrs["c_ev_lb"][t] = m.addConstr(self.vars["E_ev"][t] >= 0.0, name=f"c_ev_lb_{t}")
-            m.addConstr(self.vars["E_ev"][t] <= cfg.ev_cap_kwh, name=f"c_ev_max_{t}")
+            self.constrs["c_ev_lb"][t] = m.addConstr(
+                self.vars["E_ev_home"][t] + self.vars["E_ev_external"][t] >= 0.0,
+                name=f"c_ev_lb_{t}",
+            )
+            self.constrs["c_ev_cap"][t] = m.addConstr(
+                self.vars["E_ev_home"][t] + self.vars["E_ev_external"][t] <= cfg.ev_cap_kwh,
+                name=f"c_ev_max_{t}",
+            )
 
         self._set_objective_coeffs(
             home_import_price=[0.0] * H,
             ev_ext_import_price=[0.0] * H,
-            ev_export_price=[0.0] * H,
+            home_export_price=[0.0] * H,
+            external_export_price=[0.0] * H,
         )
         m.ModelSense = self.GRB.MINIMIZE
         m.update()
@@ -296,7 +375,8 @@ class PersistentMPCSolver:
         self,
         home_import_price: List[float],
         ev_ext_import_price: List[float],
-        ev_export_price: List[float],
+        home_export_price: List[float],
+        external_export_price: List[float],
     ) -> None:
         # Objective is linear operating cost per step.
         dt = self.cfg.dt_hours
@@ -304,7 +384,7 @@ class PersistentMPCSolver:
         for t in range(self.H):
             self.vars["p_grid_import"][t].Obj = float(home_import_price[t]) * dt
             if self.vars["p_grid_export"] is not None:
-                self.vars["p_grid_export"][t].Obj = -float(ev_export_price[t]) * dt
+                self.vars["p_grid_export"][t].Obj = 0.0
             if self.vars["p_ev_ext_ch"] is not None:
                 self.vars["p_ev_ext_ch"][t].Obj = float(ev_ext_import_price[t]) * dt + ev_degradation_cost
             if self.vars["p_ev_home_ch"] is not None:
@@ -313,47 +393,72 @@ class PersistentMPCSolver:
                 self.vars["p_ev_dis_house"][t].Obj = 0.0
             if self.vars["p_ev_dis_grid"] is not None:
                 self.vars["p_ev_dis_grid"][t].Obj = 0.0
+            if self.vars["p_ev_dis_house_home"] is not None:
+                self.vars["p_ev_dis_house_home"][t].Obj = 0.0
+            if self.vars["p_ev_dis_house_ext"] is not None:
+                self.vars["p_ev_dis_house_ext"][t].Obj = 0.0
+            if self.vars["p_ev_dis_grid_home"] is not None:
+                self.vars["p_ev_dis_grid_home"][t].Obj = -float(home_export_price[t]) * dt
+            if self.vars["p_ev_dis_grid_ext"] is not None:
+                self.vars["p_ev_dis_grid_ext"][t].Obj = -float(external_export_price[t]) * dt
+            if self.vars["p_ev_drive_home"] is not None:
+                self.vars["p_ev_drive_home"][t].Obj = 0.0
+            if self.vars["p_ev_drive_ext"] is not None:
+                self.vars["p_ev_drive_ext"][t].Obj = 0.0
             if self.vars["y_grid_dir"] is not None:
                 self.vars["y_grid_dir"][t].Obj = 0.0
             if self.vars["y_ev_mode"] is not None:
                 self.vars["y_ev_mode"][t].Obj = 0.0
 
         for t in range(self.H + 1):
-            self.vars["E_ev"][t].Obj = 0.0
+            self.vars["E_ev_home"][t].Obj = 0.0
+            self.vars["E_ev_external"][t].Obj = 0.0
 
     def _set_ub(self, family: str, t: int, ub: float) -> None:
         var_family = self.vars.get(family)
         if var_family is not None:
             var_family[t].UB = max(0.0, float(ub))
 
-    def update(self, window_arrays: Dict[str, List[float]], soc_ev_now: float) -> None:
+    def update(self, window_arrays: Dict[str, List[float]], soc_ev_home_now: float, soc_ev_external_now: float) -> None:
         """Inject current state and forecast data into mutable constraint RHS/UB values."""
         t0 = perf_counter()
         self._latest_arrays = window_arrays
         # Reset initial EV state for this rolling window.
-        self.constrs["c_init_ev"].RHS = float(soc_ev_now)
+        self.constrs["c_init_ev_home"].RHS = float(soc_ev_home_now)
+        self.constrs["c_init_ev_external"].RHS = float(soc_ev_external_now)
 
         for t in range(self.H):
             # Update forecast-dependent constraints for each look-ahead step.
             self.constrs["c_home_balance"][t].RHS = float(window_arrays["load_kw"][t])
-            self.constrs["c_ev_dyn"][t].RHS = -float(window_arrays["ev_drive_kwh"][t])
+            self.constrs["c_drive_split"][t].RHS = float(window_arrays["ev_drive_kwh"][t])
 
             # Update power limits from connection state (home, external, unavailable).
             self._set_ub("p_ev_home_ch", t, window_arrays["ev_p_home_ch_max_kw"][t])
             self._set_ub("p_ev_ext_ch", t, window_arrays["ev_p_ext_ch_max_kw"][t])
             self._set_ub("p_ev_dis_house", t, window_arrays["ev_p_dis_house_max_kw"][t])
             self._set_ub("p_ev_dis_grid", t, window_arrays["ev_p_dis_grid_max_kw"][t])
+            self._set_ub("p_ev_dis_house_home", t, window_arrays["ev_p_dis_house_max_kw"][t])
+            self._set_ub("p_ev_dis_house_ext", t, window_arrays["ev_p_dis_house_max_kw"][t])
+            self._set_ub("p_ev_dis_grid_home", t, window_arrays["ev_p_dis_grid_max_kw"][t])
+            self._set_ub("p_ev_dis_grid_ext", t, window_arrays["ev_p_dis_grid_max_kw"][t])
+            self._set_ub("p_ev_drive_home", t, self.cfg.ev_cap_kwh)
+            self._set_ub("p_ev_drive_ext", t, self.cfg.ev_cap_kwh)
             if t in self.constrs["c_ev_ch_total"]:
                 self.constrs["c_ev_ch_total"][t].RHS = float(window_arrays["ev_p_ch_total_max_kw"][t])
             if t in self.constrs["c_ev_dis_total"]:
                 self.constrs["c_ev_dis_total"][t].RHS = float(window_arrays["ev_p_dis_total_max_kw"][t])
         for t in range(self.H + 1):
-            self.constrs["c_ev_lb"][t].RHS = _effective_ev_lb(self.cfg, window_arrays["ev_reserve_kwh"][t])
+            self.constrs["c_ev_lb"][t].RHS = max(
+                0.0,
+                _effective_ev_lb(self.cfg, window_arrays["ev_reserve_kwh"][t]) - EV_SOC_CLAMP_EPS_KWH,
+            )
+            self.constrs["c_ev_cap"][t].RHS = self.cfg.ev_cap_kwh
 
         self._set_objective_coeffs(
             home_import_price=window_arrays["home_import_price"],
             ev_ext_import_price=window_arrays["ev_ext_import_price"],
-            ev_export_price=window_arrays["ev_export_price"],
+            home_export_price=window_arrays["ev_home_export_price"],
+            external_export_price=window_arrays["ev_external_export_price"],
         )
         self.model.update()
         self.last_update_time_sec = perf_counter() - t0
@@ -395,6 +500,16 @@ class PersistentMPCSolver:
         ev_ext_ch = self._x("p_ev_ext_ch", t)
         ev_dis_house = self._x("p_ev_dis_house", t)
         ev_dis_grid = self._x("p_ev_dis_grid", t)
+        ev_dis_house_home = self._x("p_ev_dis_house_home", t)
+        ev_dis_house_ext = self._x("p_ev_dis_house_ext", t)
+        ev_dis_grid_home = self._x("p_ev_dis_grid_home", t)
+        ev_dis_grid_ext = self._x("p_ev_dis_grid_ext", t)
+        ev_drive_home = self._x("p_ev_drive_home", t)
+        ev_drive_ext = self._x("p_ev_drive_ext", t)
+        ev_home = self._x("E_ev_home", t)
+        ev_external = self._x("E_ev_external", t)
+        ev_home_next = self._x("E_ev_home", t + 1)
+        ev_external_next = self._x("E_ev_external", t + 1)
         out = {
             "grid_import_kw": self._x("p_grid_import", t),
             "grid_export_kw": self._x("p_grid_export", t),
@@ -404,6 +519,18 @@ class PersistentMPCSolver:
             "ev_ext_ch_kw": ev_ext_ch,
             "ev_dis_to_home_kw": ev_dis_house,
             "ev_dis_to_grid_kw": ev_dis_grid,
+            "ev_dis_to_home_home_kwh": ev_dis_house_home * self.cfg.dt_hours,
+            "ev_dis_to_home_external_kwh": ev_dis_house_ext * self.cfg.dt_hours,
+            "ev_dis_to_grid_home_kwh": ev_dis_grid_home * self.cfg.dt_hours,
+            "ev_dis_to_grid_external_kwh": ev_dis_grid_ext * self.cfg.dt_hours,
+            "ev_drive_home_kwh": ev_drive_home,
+            "ev_drive_external_kwh": ev_drive_ext,
+            "ev_home_energy_kwh": ev_home,
+            "ev_external_energy_kwh": ev_external,
+            "ev_energy_kwh": ev_home + ev_external,
+            "ev_home_energy_next_kwh": ev_home_next,
+            "ev_external_energy_next_kwh": ev_external_next,
+            "ev_energy_next_kwh": ev_home_next + ev_external_next,
             "ev_ch_kw": ev_home_ch + ev_ext_ch,
             "ev_dis_kw": ev_dis_house + ev_dis_grid,
         }
@@ -425,35 +552,37 @@ class PersistentMPCSolver:
         return out
 
 
-def _safe_fallback_step(row: pd.Series, cfg: EnergySystemConfig, e_ev: float) -> Dict[str, float]:
-    """Cheap feasible fallback preserving home-vs-external EV channel separation."""
+def _safe_fallback_step(row: pd.Series, cfg: EnergySystemConfig, e_ev_home: float, e_ev_external: float) -> Dict[str, float]:
+    """Cheap feasible fallback that keeps the split-state accounting consistent."""
     load_kw = float(row["load_kw"])
-    # Minimum EV energy required at this timestep (SOC floor + reserve policy).
+    drive_kwh = float(row["ev_drive_kwh"])
     ev_lb = _effective_ev_lb(cfg, float(row["ev_reserve_kwh"]))
     p_ev_home_ch_max = float(row.get("ev_p_home_ch_max_kw", 0.0))
     p_ev_ext_ch_max = float(row.get("ev_p_ext_ch_max_kw", 0.0))
-    p_ev_dis_house_max = float(row.get("ev_p_dis_house_max_kw", 0.0))
 
-    p_ev_dis_to_home = 0.0
-    if p_ev_dis_house_max > 0.0 and e_ev > ev_lb:
-        # Only discharge the EV when we are above the lower bound.
-        p_dis_e_limit = max(0.0, (e_ev - ev_lb) * cfg.ev_eta_dis / cfg.dt_hours)
-        p_ev_dis_to_home = min(p_ev_dis_house_max, p_dis_e_limit, load_kw)
-
-    p_grid_import = max(0.0, load_kw - p_ev_dis_to_home)
+    total_now = e_ev_home + e_ev_external
     p_ev_home_ch = 0.0
     p_ev_ext_ch = 0.0
+    p_grid_import = min(load_kw, cfg.p_grid_max_kw)
 
-    if e_ev < ev_lb:
-        # If EV is below required reserve, prioritize charging back to the floor.
-        p_need_kw = (ev_lb - e_ev) / (cfg.ev_eta_ch * cfg.dt_hours)
+    if total_now < ev_lb:
+        p_need_kwh = (ev_lb - total_now) / cfg.ev_eta_ch
         home_headroom = max(0.0, cfg.p_grid_max_kw - p_grid_import)
-        p_ev_home_ch = min(p_ev_home_ch_max, home_headroom, p_need_kw)
-        p_need_kw = max(0.0, p_need_kw - p_ev_home_ch)
-        p_ev_ext_ch = min(p_ev_ext_ch_max, p_need_kw)
-        p_grid_import += p_ev_home_ch
+        p_ev_home_ch = min(p_ev_home_ch_max, home_headroom, p_need_kwh)
+        p_need_kwh = max(0.0, p_need_kwh - p_ev_home_ch * cfg.dt_hours)
+        p_ev_ext_ch = min(p_ev_ext_ch_max, p_need_kwh / cfg.dt_hours)
+        p_grid_import = min(cfg.p_grid_max_kw, p_grid_import + p_ev_home_ch)
 
-    p_grid_import = min(cfg.p_grid_max_kw, p_grid_import)
+    drive_ext = min(drive_kwh, e_ev_external)
+    drive_home = max(0.0, drive_kwh - drive_ext)
+    next_home = max(0.0, e_ev_home + cfg.ev_eta_ch * p_ev_home_ch * cfg.dt_hours - drive_home)
+    next_external = max(0.0, e_ev_external + cfg.ev_eta_ch * p_ev_ext_ch * cfg.dt_hours - drive_ext)
+    total_next = min(cfg.ev_cap_kwh, max(ev_lb, next_home + next_external))
+    if total_next > 0.0:
+        scale = total_next / max(next_home + next_external, 1e-12)
+        next_home *= scale
+        next_external *= scale
+
     return {
         "grid_import_kw": p_grid_import,
         "grid_export_kw": 0.0,
@@ -461,27 +590,69 @@ def _safe_fallback_step(row: pd.Series, cfg: EnergySystemConfig, e_ev: float) ->
         "bat_dis_kw": 0.0,
         "ev_home_ch_kw": p_ev_home_ch,
         "ev_ext_ch_kw": p_ev_ext_ch,
-        "ev_dis_to_home_kw": p_ev_dis_to_home,
+        "ev_dis_to_home_kw": 0.0,
         "ev_dis_to_grid_kw": 0.0,
+        "ev_dis_to_home_home_kwh": 0.0,
+        "ev_dis_to_home_external_kwh": 0.0,
+        "ev_dis_to_grid_home_kwh": 0.0,
+        "ev_dis_to_grid_external_kwh": 0.0,
+        "ev_drive_home_kwh": drive_home,
+        "ev_drive_external_kwh": drive_ext,
+        "ev_home_energy_kwh": e_ev_home,
+        "ev_external_energy_kwh": e_ev_external,
+        "ev_energy_kwh": e_ev_home + e_ev_external,
+        "ev_home_energy_next_kwh": next_home,
+        "ev_external_energy_next_kwh": next_external,
+        "ev_energy_next_kwh": next_home + next_external,
         "ev_ch_kw": p_ev_home_ch + p_ev_ext_ch,
-        "ev_dis_kw": p_ev_dis_to_home,
+        "ev_dis_kw": 0.0,
     }
 
 
-def _action_from_solution(solution: Dict[str, List[float]], t: int) -> Dict[str, float]:
-    ev_home_ch = float(solution.get("p_ev_home_ch", [0.0])[t]) if "p_ev_home_ch" in solution else 0.0
-    ev_ext_ch = float(solution.get("p_ev_ext_ch", [0.0])[t]) if "p_ev_ext_ch" in solution else 0.0
-    ev_dis_house = float(solution.get("p_ev_dis_house", [0.0])[t]) if "p_ev_dis_house" in solution else 0.0
-    ev_dis_grid = float(solution.get("p_ev_dis_grid", [0.0])[t]) if "p_ev_dis_grid" in solution else 0.0
+def _action_from_solution(solution: Dict[str, List[float]], t: int, cfg: EnergySystemConfig) -> Dict[str, float]:
+    def _val(key: str) -> float:
+        arr = solution.get(key)
+        if arr is None or t >= len(arr):
+            return 0.0
+        return float(arr[t])
+
+    ev_home_ch = _val("p_ev_home_ch")
+    ev_ext_ch = _val("p_ev_ext_ch")
+    ev_dis_house = _val("p_ev_dis_house")
+    ev_dis_grid = _val("p_ev_dis_grid")
+    ev_dis_house_home = _val("p_ev_dis_house_home")
+    ev_dis_house_ext = _val("p_ev_dis_house_ext")
+    ev_dis_grid_home = _val("p_ev_dis_grid_home")
+    ev_dis_grid_ext = _val("p_ev_dis_grid_ext")
+    ev_drive_home = _val("p_ev_drive_home")
+    ev_drive_ext = _val("p_ev_drive_ext")
+    ev_home = _val("E_ev_home")
+    ev_external = _val("E_ev_external")
+    ev_home_next_arr = solution.get("E_ev_home", [])
+    ev_external_next_arr = solution.get("E_ev_external", [])
+    ev_home_next = float(ev_home_next_arr[t + 1]) if t + 1 < len(ev_home_next_arr) else ev_home
+    ev_external_next = float(ev_external_next_arr[t + 1]) if t + 1 < len(ev_external_next_arr) else ev_external
     return {
-        "grid_import_kw": float(solution.get("p_grid_import", [0.0])[t]) if "p_grid_import" in solution else 0.0,
-        "grid_export_kw": float(solution.get("p_grid_export", [0.0])[t]) if "p_grid_export" in solution else 0.0,
+        "grid_import_kw": _val("p_grid_import"),
+        "grid_export_kw": _val("p_grid_export"),
         "bat_ch_kw": 0.0,
         "bat_dis_kw": 0.0,
         "ev_home_ch_kw": ev_home_ch,
         "ev_ext_ch_kw": ev_ext_ch,
         "ev_dis_to_home_kw": ev_dis_house,
         "ev_dis_to_grid_kw": ev_dis_grid,
+        "ev_dis_to_home_home_kwh": ev_dis_house_home * cfg.dt_hours,
+        "ev_dis_to_home_external_kwh": ev_dis_house_ext * cfg.dt_hours,
+        "ev_dis_to_grid_home_kwh": ev_dis_grid_home * cfg.dt_hours,
+        "ev_dis_to_grid_external_kwh": ev_dis_grid_ext * cfg.dt_hours,
+        "ev_drive_home_kwh": ev_drive_home,
+        "ev_drive_external_kwh": ev_drive_ext,
+        "ev_home_energy_kwh": ev_home,
+        "ev_external_energy_kwh": ev_external,
+        "ev_energy_kwh": ev_home + ev_external,
+        "ev_home_energy_next_kwh": ev_home_next,
+        "ev_external_energy_next_kwh": ev_external_next,
+        "ev_energy_next_kwh": ev_home_next + ev_external_next,
         "ev_ch_kw": ev_home_ch + ev_ext_ch,
         "ev_dis_kw": ev_dis_house + ev_dis_grid,
     }
@@ -490,13 +661,14 @@ def _action_from_solution(solution: Dict[str, List[float]], t: int) -> Dict[str,
 def _build_and_solve_window_gurobi(
     window: pd.DataFrame,
     cfg: EnergySystemConfig,
-    e_ev0: float,
+    e_ev_home0: float,
+    e_ev_external0: float,
     solver_tee: bool = False,
 ) -> MPCSolveResult:
     """Legacy mode: rebuild one temporary model per window solve."""
     solver = PersistentMPCSolver(cfg=cfg, H=len(window), solver_tee=solver_tee)
     arrays = WindowDataManager.get_arrays(window, 0, len(window), cfg)
-    solver.update(arrays, soc_ev_now=e_ev0)
+    solver.update(arrays, soc_ev_home_now=e_ev_home0, soc_ev_external_now=e_ev_external0)
     status = solver.optimize()
     if solver.model.SolCount == 0:
         return MPCSolveResult(first_step={}, status=status)
@@ -596,7 +768,7 @@ def run_mpc_loop(
                 # Build numeric arrays for the current window and inject them into the persistent model.
                 arrays = WindowDataManager.get_arrays(df, i, cfg.horizon_steps, cfg)
                 t_update = perf_counter()
-                persistent_solver.update(arrays, soc_ev_now=e_ev)
+                persistent_solver.update(arrays, soc_ev_home_now=e_ev_home, soc_ev_external_now=e_ev_external)
                 if use_mip_start and prev_solution is not None:
                     # Warm-start from previous solution to reduce solve time.
                     persistent_solver.apply_mip_start(prev_solution, shift=prev_solution_shift)
@@ -617,10 +789,10 @@ def run_mpc_loop(
                     logs.append({"timestamp": str(ts), "step": i + 1, "status": status, "action": "fallback"})
             else:
                 # Legacy mode: rebuild model per window (slower, but useful for regression comparison).
-                solved = _build_and_solve_window_gurobi(window, cfg, e_ev, solver_tee=solver_tee)
+                solved = _build_and_solve_window_gurobi(window, cfg, e_ev_home, e_ev_external, solver_tee=solver_tee)
                 status = solved.status
                 if solved.full_solution:
-                    block_actions = [_action_from_solution(solved.full_solution, t) for t in range(apply_steps)]
+                    block_actions = [_action_from_solution(solved.full_solution, t, cfg) for t in range(apply_steps)]
                     if use_mip_start:
                         prev_solution = solved.full_solution
                         prev_solution_shift = apply_steps
@@ -644,53 +816,29 @@ def run_mpc_loop(
             j = i + local_t
             ts_step = df.index[j]
             row = df.iloc[j]
-            e_ev_start = e_ev
+            e_ev_start = e_ev_home + e_ev_external
             e_ev_home_start = e_ev_home
             e_ev_external_start = e_ev_external
             e_ev_pre_clamp_start = prev_e_ev_raw
             step = (
                 block_actions[local_t]
                 if local_t < len(block_actions)
-                else _safe_fallback_step(row, cfg, e_ev)
+                else _safe_fallback_step(row, cfg, e_ev_home, e_ev_external)
             )
 
             drive_kwh = float(row["ev_drive_kwh"])
-            drive_external_kwh = 0.0
-            drive_home_kwh = 0.0
-            e_ev_external, e_ev_home, drive_external_kwh, drive_home_kwh = _take_from_split(
-                e_ev_external,
-                e_ev_home,
-                drive_kwh,
+            drive_external = min(drive_kwh, e_ev_external_start)
+            drive_home = max(0.0, drive_kwh - drive_external)
+            home_charge_kwh = float(step["ev_home_ch_kw"]) * cfg.dt_hours
+            external_charge_kwh = float(step["ev_ext_ch_kw"]) * cfg.dt_hours
+            dis_home_store_kwh = (float(step["ev_dis_to_home_home_kwh"]) + float(step["ev_dis_to_grid_home_kwh"])) / cfg.ev_eta_dis
+            dis_external_store_kwh = (float(step["ev_dis_to_home_external_kwh"]) + float(step["ev_dis_to_grid_external_kwh"])) / cfg.ev_eta_dis
+            e_ev_home_next = max(0.0, e_ev_home_start + cfg.ev_eta_ch * home_charge_kwh - dis_home_store_kwh - drive_home)
+            e_ev_external_next = max(
+                0.0,
+                e_ev_external_start + cfg.ev_eta_ch * external_charge_kwh - dis_external_store_kwh - drive_external,
             )
-
-            ev_dis_to_home_kwh = float(step["ev_dis_to_home_kw"]) * cfg.dt_hours
-            ev_dis_to_grid_kwh = float(step["ev_dis_to_grid_kw"]) * cfg.dt_hours
-            dis_to_home_store_kwh = ev_dis_to_home_kwh / cfg.ev_eta_dis
-            dis_to_grid_store_kwh = ev_dis_to_grid_kwh / cfg.ev_eta_dis
-            e_ev_external, e_ev_home, dis_to_home_external_store_kwh, dis_to_home_home_store_kwh = _take_from_split(
-                e_ev_external,
-                e_ev_home,
-                dis_to_home_store_kwh,
-            )
-            e_ev_external, e_ev_home, dis_to_grid_external_store_kwh, dis_to_grid_home_store_kwh = _take_from_split(
-                e_ev_external,
-                e_ev_home,
-                dis_to_grid_store_kwh,
-            )
-
-            ev_home_charge_kwh = float(step["ev_home_ch_kw"]) * cfg.dt_hours
-            ev_ext_charge_kwh = float(step["ev_ext_ch_kw"]) * cfg.dt_hours
-            e_ev_home += cfg.ev_eta_ch * ev_home_charge_kwh
-            e_ev_external += cfg.ev_eta_ch * ev_ext_charge_kwh
-
-            # Crucial state transition: previous energy + charging - discharging - driving consumption.
-            e_ev_raw_next = (
-                e_ev
-                + (cfg.ev_eta_ch * (step["ev_home_ch_kw"] + step["ev_ext_ch_kw"]))
-                * cfg.dt_hours
-                - ((step["ev_dis_to_home_kw"] + step["ev_dis_to_grid_kw"]) / cfg.ev_eta_dis) * cfg.dt_hours
-                - drive_kwh
-            )
+            e_ev_raw_next = e_ev_home_next + e_ev_external_next
 
             # Clamp carried state against the reserve of the step it will be used in (j+1),
             # not the reserve of the action step (j), to avoid a one-step timing mismatch.
@@ -699,7 +847,7 @@ def run_mpc_loop(
             else:
                 ev_lb_carry = _effective_ev_lb(cfg, ev_reserve_kwh_by_step[j])
             e_ev = min(max(e_ev_raw_next, ev_lb_carry), cfg.ev_cap_kwh)
-            e_ev_home, e_ev_external = _scale_split_to_total(e_ev_home, e_ev_external, e_ev)
+            e_ev_home, e_ev_external = _scale_split_to_total(e_ev_home_next, e_ev_external_next, e_ev)
             # Clamp diagnostics are reported as start-of-step quantities:
             # compare current clamped start state vs previous step raw carry-over.
             ev_soc_clamp_delta_kwh = e_ev_start - e_ev_pre_clamp_start
@@ -721,12 +869,15 @@ def run_mpc_loop(
                     "ev_soc_clamped_after_fallback": ev_soc_clamped_after_fallback,
                     "ev_soc_clamp_after_fallback_delta_kwh": ev_soc_clamp_delta_kwh if ev_soc_clamped_after_fallback > 0.5 else 0.0,
                     "ev_consumption_kwh": drive_kwh,
-                    "ev_drive_external_kwh": drive_external_kwh,
-                    "ev_drive_home_kwh": drive_home_kwh,
-                    "ev_dis_to_home_external_kwh": dis_to_home_external_store_kwh * cfg.ev_eta_dis,
-                    "ev_dis_to_home_home_kwh": dis_to_home_home_store_kwh * cfg.ev_eta_dis,
-                    "ev_dis_to_grid_external_kwh": dis_to_grid_external_store_kwh * cfg.ev_eta_dis,
-                    "ev_dis_to_grid_home_kwh": dis_to_grid_home_store_kwh * cfg.ev_eta_dis,
+                    "ev_drive_external_kwh": drive_external,
+                    "ev_drive_home_kwh": drive_home,
+                    "ev_dis_to_home_external_kwh": float(step["ev_dis_to_home_external_kwh"]),
+                    "ev_dis_to_home_home_kwh": float(step["ev_dis_to_home_home_kwh"]),
+                    "ev_dis_to_grid_external_kwh": float(step["ev_dis_to_grid_external_kwh"]),
+                    "ev_dis_to_grid_home_kwh": float(step["ev_dis_to_grid_home_kwh"]),
+                    "ev_home_energy_next_kwh": e_ev_home_next,
+                    "ev_external_energy_next_kwh": e_ev_external_next,
+                    "ev_energy_next_kwh": e_ev_raw_next,
                     "solver_status": status,
                     "used_fallback": float(used_fallback),
                 }
