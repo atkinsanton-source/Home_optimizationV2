@@ -16,6 +16,7 @@ class ElectricityPriceData:
         self,
         time,
         electricity_prices,
+        home_buy_prices,
         day_ahead_price,
         ev_at_home_mask,
         discharging_mask,
@@ -23,6 +24,7 @@ class ElectricityPriceData:
     ):
         self.time = time
         self.electricity_prices = electricity_prices
+        self.home_buy_prices = home_buy_prices
         self.day_ahead_price = day_ahead_price
         self.ev_at_home_mask = ev_at_home_mask
         self.discharging_mask = discharging_mask
@@ -36,7 +38,8 @@ class ElectricityPriceData:
 
 
         time = pd.to_datetime(data_results["local_time"])
-        electricity_prices = data_results["home_grid_price_total_eur_per_kwh"]
+        electricity_prices = data_results.get("home_grid_price_total_eur_per_kwh", data_results["import_price_eur_per_kwh"])
+        home_buy_prices = data_results.get("ev_home_import_price_eur_per_kwh", electricity_prices)
         day_ahead_price = data_initial["day_ahead_price"] / 1000.0
         ev_at_home_mask = data_results["ev_state"] == "home"
         discharging_mask = data_results["grid_export_kwh"] > 0
@@ -45,6 +48,7 @@ class ElectricityPriceData:
         return cls(
             time,
             electricity_prices,
+            home_buy_prices,
             day_ahead_price,
             ev_at_home_mask,
             discharging_mask,
@@ -82,6 +86,10 @@ class ElectricityPriceData:
     @property
     def time_at_home(self):
         return self.time[self.ev_at_home_mask]
+
+    @property
+    def home_buy_prices_at_home(self):
+        return self.home_buy_prices[self.ev_at_home_mask]
 
 
 
@@ -162,7 +170,7 @@ def plot_weighted_grid_import_price(ax, grid_import_kwh, electricity_prices):
 
     return
 
-def plot_sorted_buy_prices_with_best_future_sell_price(ax, day_ahead_price):
+def plot_sorted_buy_prices_with_best_future_sell_price(ax, home_buy_price_total_eur_per_kwh):
     cfg = EnergySystemConfig()
     ev_battery_deg=cfg.ev_degradation_eur_per_kwh_charged
     extra_costs_electricity=cfg.import_price_adder_eur_per_kwh
@@ -172,7 +180,11 @@ def plot_sorted_buy_prices_with_best_future_sell_price(ax, day_ahead_price):
     roundtrip_efficiency = cfg.ev_eta_ch*cfg.ev_eta_dis
     threshold = extra_costs_electricity-netzentgelt-stromsteuer+ev_battery_deg
 
-    day_ahead_prices = list(day_ahead_price)
+    home_buy_prices = list(home_buy_price_total_eur_per_kwh)
+    day_ahead_prices = [
+        (value - extra_costs_electricity) / Mehrwehrtsteuer
+        for value in home_buy_prices
+    ]
     best_future_sell_prices = []
 
     for current_index, current_day_ahead_price in enumerate(day_ahead_prices):
@@ -189,7 +201,7 @@ def plot_sorted_buy_prices_with_best_future_sell_price(ax, day_ahead_price):
         best_future_sell_prices.append(best_future_sell_price)
 
     data = pd.DataFrame({
-        "buy_price": day_ahead_price,
+        "buy_price": home_buy_prices,
         "best_future_sell_price": best_future_sell_prices,
     })
 
@@ -211,7 +223,7 @@ def plot_sorted_buy_prices_with_best_future_sell_price(ax, day_ahead_price):
 
     return
 
-def plot_price_deltas_with_profit_in24h(ax, time, day_ahead_price, electricity_prices, discharging_mask=None, ev_at_home_mask=None, at_home_only=False):
+def plot_price_deltas_with_profit_in24h(ax, time, day_ahead_price, buy_price_total_eur_per_kwh, discharging_mask=None, ev_at_home_mask=None, at_home_only=False):
     profitable_sell_mask = []
     cfg = EnergySystemConfig()
     ev_battery_deg=cfg.ev_degradation_eur_per_kwh_charged
@@ -223,15 +235,19 @@ def plot_price_deltas_with_profit_in24h(ax, time, day_ahead_price, electricity_p
     
     threshold = extra_costs_electricity-netzentgelt-stromsteuer+ev_battery_deg
     
-    for current_index, current_day_ahead_price in enumerate(day_ahead_price):
+    current_buy_prices = pd.Series(buy_price_total_eur_per_kwh, dtype="float64").tolist()
+
+    for current_index, current_buy_price in enumerate(current_buy_prices):
         profitable = False
         if at_home_only and not ev_at_home_mask.iloc[current_index]:
             profitable_sell_mask.append(False)
             continue
 
+        current_day_ahead_price = (float(current_buy_price) - extra_costs_electricity) / Mehrwehrtsteuer
         start_index = max(0, current_index - 96)
         for past_index in range(current_index - 1, start_index - 1, -1):
-            past_day_ahead_price = day_ahead_price.iloc[past_index]
+            past_buy_price = float(current_buy_prices[past_index])
+            past_day_ahead_price = (past_buy_price - extra_costs_electricity) / Mehrwehrtsteuer
 
             if at_home_only and not ev_at_home_mask.iloc[past_index]:
                 continue
@@ -241,7 +257,7 @@ def plot_price_deltas_with_profit_in24h(ax, time, day_ahead_price, electricity_p
 
         profitable_sell_mask.append(profitable)
 
-    ax.plot(time, electricity_prices, label="Electricity Price", color="blue")
+    ax.plot(time, current_buy_prices, label="EV Home Charge Price", color="blue")
 
     window_start = None
     for index, profitable in enumerate(profitable_sell_mask):
@@ -355,7 +371,7 @@ def plot_carpet(ax, time, values, title, colorbar_label, fig, cmap="viridis", cl
 
     return image
 
-def calculate_best_future_v2g_profit_margin(home_grid_price_total_eur_per_kwh, scenario_name):
+def calculate_best_future_v2g_profit_margin(home_buy_price_total_eur_per_kwh, scenario_name):
     cfg = EnergySystemConfig()
     extra_costs_electricity = cfg.import_price_adder_eur_per_kwh
     mehrwertsteuer = cfg.import_price_adder_pct + 1.0
@@ -372,7 +388,7 @@ def calculate_best_future_v2g_profit_margin(home_grid_price_total_eur_per_kwh, s
 
     day_ahead_prices = [
         (value - extra_costs_electricity) / mehrwertsteuer
-        for value in home_grid_price_total_eur_per_kwh
+        for value in home_buy_price_total_eur_per_kwh
     ]
 
     best_future_profit_margins = []
@@ -398,7 +414,7 @@ def calculate_best_future_v2g_profit_margin(home_grid_price_total_eur_per_kwh, s
 def plot_carpet_plots(output_folder_path):
     cfg = EnergySystemConfig()
     carpet_specs = [
-        ("Consumer Buy Price", "Euro/KWh", "home_grid_price_total_eur_per_kwh", "viridis", True, None, None),
+        ("EV Home Charge Price", "Euro/KWh", "ev_home_import_price_eur_per_kwh", "viridis", True, None, None),
         ("EV State of Charge", "SOC [%]", "ev_soc_pct", "YlGn", False, 0, 100),
         ("Grid Import Usage", "KW", "grid_import_kw", "Blues", False, None, None),
         ("Grid Export Usage", "KW", "grid_export_kw", "Oranges", False, 0, 12),
@@ -488,7 +504,7 @@ def plot_carpet_plots(output_folder_path):
         data = pd.read_csv(result_path, low_memory=False)
         time = pd.to_datetime(data["local_time"])
         data["best_future_v2g_profit_margin"] = calculate_best_future_v2g_profit_margin(
-            data["home_grid_price_total_eur_per_kwh"].tolist(),
+            data["ev_home_import_price_eur_per_kwh"].tolist(),
             scenario_path.name,
         )
 
@@ -800,12 +816,12 @@ def main():
         x = [0.0, 0.1, 0.2]
         plot_electricity_price(axes[0, 0], data.time, data.electricity_prices)
         plot_priced_hours(axes[0, 1], data.electricity_prices, "Sorted Dynamic Electricity Price")
-        plot_price_deltas_with_profit_in24h(axes[1, 0], data.time, data.day_ahead_price, data.electricity_prices)
-        plot_price_deltas_with_profit_in24h(axes[1, 1], data.time, data.day_ahead_price, data.electricity_prices, data.discharging_mask, data.ev_at_home_mask, True)
-        plot_priced_hours(axes[0, 2], data.electricity_prices_at_home, "Sorted Dynamic Electricity Price When EV Is At Home")
+        plot_price_deltas_with_profit_in24h(axes[1, 0], data.time, data.day_ahead_price, data.home_buy_prices)
+        plot_price_deltas_with_profit_in24h(axes[1, 1], data.time, data.day_ahead_price, data.home_buy_prices, data.discharging_mask, data.ev_at_home_mask, True)
+        plot_priced_hours(axes[0, 2], data.home_buy_prices_at_home, "Sorted Dynamic EV Home Charge Price When EV Is At Home")
         plot_weighted_grid_import_price(axes[0, 3], data.grid_import_kwh, data.electricity_prices)
         plot_indifference_curve_v2g(axes[1, 2], x)
-        plot_sorted_buy_prices_with_best_future_sell_price(axes[1, 3], data.day_ahead_price)
+        plot_sorted_buy_prices_with_best_future_sell_price(axes[1, 3], data.home_buy_prices)
         plt.tight_layout()
         plt.show()
 

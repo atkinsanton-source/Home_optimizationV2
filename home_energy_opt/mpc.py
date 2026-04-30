@@ -75,6 +75,8 @@ class WindowDataManager:
             if cfg.pad_tail_neutral_prices:
                 for col in (
                     "import_price_eur_per_kwh",
+                    "home_grid_price_eur_per_kwh",
+                    "ev_home_import_price_eur_per_kwh",
                     "ev_ext_import_price_eur_per_kwh",
                     "ev_export_price_eur_per_kwh",
                     "ev_home_export_price_eur_per_kwh",
@@ -94,7 +96,8 @@ class WindowDataManager:
 
         return {
             "load_kw": window["load_kw"].astype(float).tolist(),
-            "home_import_price": window["import_price_eur_per_kwh"].astype(float).tolist(),
+            "home_import_price": window.get("home_grid_price_eur_per_kwh", window["import_price_eur_per_kwh"]).astype(float).tolist(),
+            "ev_home_import_price": window.get("ev_home_import_price_eur_per_kwh", window["import_price_eur_per_kwh"]).astype(float).tolist(),
             "ev_drive_kwh": window["ev_drive_kwh"].astype(float).tolist(),
             "ev_reserve_kwh": ev_reserve_kwh,
             "ev_p_home_ch_max_kw": window["ev_p_home_ch_max_kw"].astype(float).tolist(),
@@ -364,6 +367,7 @@ class PersistentMPCSolver:
 
         self._set_objective_coeffs(
             home_import_price=[0.0] * H,
+            ev_home_import_price=[0.0] * H,
             ev_ext_import_price=[0.0] * H,
             home_export_price=[0.0] * H,
             external_export_price=[0.0] * H,
@@ -374,6 +378,7 @@ class PersistentMPCSolver:
     def _set_objective_coeffs(
         self,
         home_import_price: List[float],
+        ev_home_import_price: List[float],
         ev_ext_import_price: List[float],
         home_export_price: List[float],
         external_export_price: List[float],
@@ -388,7 +393,7 @@ class PersistentMPCSolver:
             if self.vars["p_ev_ext_ch"] is not None:
                 self.vars["p_ev_ext_ch"][t].Obj = float(ev_ext_import_price[t]) * dt + ev_degradation_cost
             if self.vars["p_ev_home_ch"] is not None:
-                self.vars["p_ev_home_ch"][t].Obj = ev_degradation_cost
+                self.vars["p_ev_home_ch"][t].Obj = (float(ev_home_import_price[t]) - float(home_import_price[t])) * dt + ev_degradation_cost
             if self.vars["p_ev_dis_house"] is not None:
                 self.vars["p_ev_dis_house"][t].Obj = 0.0
             if self.vars["p_ev_dis_grid"] is not None:
@@ -456,6 +461,7 @@ class PersistentMPCSolver:
 
         self._set_objective_coeffs(
             home_import_price=window_arrays["home_import_price"],
+            ev_home_import_price=window_arrays["ev_home_import_price"],
             ev_ext_import_price=window_arrays["ev_ext_import_price"],
             home_export_price=window_arrays["ev_home_export_price"],
             external_export_price=window_arrays["ev_external_export_price"],
@@ -945,13 +951,20 @@ def run_mpc_loop(
     out["ev_ext_ch_kwh"] = out["ev_ext_ch_kw"] * cfg.dt_hours
     out["ev_dis_to_home_kwh"] = out["ev_dis_to_home_kw"] * cfg.dt_hours
     out["ev_dis_to_grid_kwh"] = out["ev_dis_to_grid_kw"] * cfg.dt_hours
+    home_grid_price = pd.to_numeric(df.get("home_grid_price_eur_per_kwh", df["import_price_eur_per_kwh"]), errors="coerce").fillna(0.0)
+    ev_home_import_price = pd.to_numeric(
+        df.get("ev_home_import_price_eur_per_kwh", df["import_price_eur_per_kwh"]),
+        errors="coerce",
+    ).fillna(0.0)
     out["ext_charge_cost_eur"] = df["ev_ext_import_price_eur_per_kwh"] * out["ev_ext_ch_kwh"]
     out["ev_battery_degradation_cost_eur"] = (
         float(cfg.ev_degradation_eur_per_kwh_charged) * (out["ev_home_ch_kwh"] + out["ev_ext_ch_kwh"])
     )
     out["home_load_grid_import_kwh"] = out[["grid_import_kwh", "home_load_kwh"]].min(axis=1)
-    out["ev_home_charge_cost_eur"] = df["import_price_eur_per_kwh"] * out["ev_home_ch_kwh"]
-    out["home_load_cost_eur"] = df["import_price_eur_per_kwh"] * out["home_load_grid_import_kwh"]
+    out["ev_home_charge_cost_eur"] = ev_home_import_price * out["ev_home_ch_kwh"]
+    out["home_load_cost_eur"] = home_grid_price * out["home_load_kwh"]
+    out["home_grid_price_total_eur_per_kwh"] = home_grid_price
+    out["ev_home_import_price_eur_per_kwh"] = ev_home_import_price
     out["ev_home_export_price_eur_per_kwh"] = df["ev_home_export_price_eur_per_kwh"]
     out["ev_external_export_price_eur_per_kwh"] = df["ev_external_export_price_eur_per_kwh"]
     out["ev_export_price_eur_per_kwh"] = df["ev_export_price_eur_per_kwh"]
@@ -963,12 +976,12 @@ def run_mpc_loop(
         out["ev_discharge_grid_revenue_home_eur"] + out["ev_discharge_grid_revenue_external_eur"]
     )
     out["step_cost_eur"] = (
-        df["import_price_eur_per_kwh"] * out["grid_import_kwh"]
+        home_grid_price * out["home_load_kwh"]
+        + ev_home_import_price * out["ev_home_ch_kwh"]
         - out["ev_discharge_grid_revenue_eur"]
         + out["ext_charge_cost_eur"]
         + out["ev_battery_degradation_cost_eur"]
     )
-    out["home_grid_price_total_eur_per_kwh"] = df["import_price_eur_per_kwh"]
     out["ev_reserve_kwh"] = df["ev_reserve_kwh"]
     out["ev_state"] = df["ev_state"]
     out["charging_point_effective"] = df["charging_point_effective"]

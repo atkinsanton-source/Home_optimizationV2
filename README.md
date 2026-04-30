@@ -62,6 +62,8 @@ Outputs:
 
 Set `baseline_static_import_price_eur_per_kwh` in `home_energy_opt/config.py` to control the static home import tariff used by the static baseline.
 
+To model a wallbox-specific state discount, set `wallbox_cost_discount_eur_per_kwh` in `home_energy_opt/config.py`. This applies an absolute EUR/kWh reduction only to home EV charging, not to ordinary home load.
+
 ## Extension hooks already prepared
 
 - EV power limits currently derive from `EV_state == "home"` with fixed home limits; can be replaced by time-series columns (`P_ev_ch_max_kw[t]`, `P_ev_dis_max_kw[t]`).

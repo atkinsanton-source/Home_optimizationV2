@@ -123,13 +123,19 @@ class BaselineHeuristic(ABC):
             float(cfg.ev_degradation_eur_per_kwh_charged) * (result["ev_home_ch_kwh"] + result["ev_ext_ch_kwh"])
         )
         home_import_price = self._home_import_price_series(df, cfg)
+        ev_home_import_price = pd.to_numeric(
+            df.get("ev_home_import_price_eur_per_kwh", home_import_price),
+            errors="coerce",
+        ).fillna(0.0).astype(float)
         result["home_grid_price_total_eur_per_kwh"] = home_import_price
+        result["ev_home_import_price_eur_per_kwh"] = ev_home_import_price
         result["home_load_grid_import_kwh"] = result[["grid_import_kwh", "home_load_kwh"]].min(axis=1)
-        result["ev_home_charge_cost_eur"] = home_import_price * result["ev_home_ch_kwh"]
-        result["home_load_cost_eur"] = home_import_price * result["home_load_grid_import_kwh"]
+        result["ev_home_charge_cost_eur"] = ev_home_import_price * result["ev_home_ch_kwh"]
+        result["home_load_cost_eur"] = home_import_price * result["home_load_kwh"]
         result["ev_discharge_grid_revenue_eur"] = df["ev_export_price_eur_per_kwh"] * result["ev_dis_to_grid_kwh"]
         result["step_cost_eur"] = (
-            home_import_price * result["grid_import_kwh"]
+            home_import_price * result["home_load_kwh"]
+            + ev_home_import_price * result["ev_home_ch_kwh"]
             - df["ev_export_price_eur_per_kwh"] * result["grid_export_kwh"]
             + result["ext_charge_cost_eur"]
             + result["ev_battery_degradation_cost_eur"]

@@ -67,13 +67,14 @@ class EnergySystemConfig:
     import_price_adder_eur_per_kwh: float = 0.1944 # Von Octopus Energy
     import_price_adder_pct: float = 0.19  # Mehrwertsteuer 19%
     import_price_deduction_eur_per_kwh: float = 0.0
+    wallbox_cost_discount_eur_per_kwh: float = 0.0888 * 0.6
     baseline_static_import_price_eur_per_kwh: float = 0.3627
     static_mpc_import_price_eur_per_kwh: float = 0.3627
 
     # Export remuneration
     export_price_source: str = "dynamic"  # "fixed" or "dynamic"
     export_price_eur_per_kwh: float = 0.0778
-    export_price_adder_eur_per_kwh: float = 0.0997 +0.0244 #Stromnetz Berlin dokument für 2025 Netzentgelt + Stromsteuer
+    export_price_adder_eur_per_kwh: float = 0.0888 + 0.00530 + 0.01120 + 0.01860 #Stromnetz Berlin dokument für 2026 Netzentgelt + KWKG Umlage 2026 Berlin + Offshore Umlage 2026 + StromNEV Umlage 2026
     export_price_deduction_eur_per_kwh: float = 0.0
 
     # EV
