@@ -983,10 +983,4 @@ def run_mpc_loop(
         ev_home_import_price=ev_home_import_price,
         ev_home_ch_kwh=out["ev_home_ch_kwh"],
         ext_charge_cost_eur=out["ext_charge_cost_eur"],
-        ev_battery_degradation_cost_eur=out["ev_battery_degradation_cost_eur"],
-        ev_discharge_grid_revenue_eur=out["ev_discharge_grid_revenue_eur"],
-    )
-    out["ev_reserve_kwh"] = df["ev_reserve_kwh"]
-    out["ev_state"] = df["ev_state"]
-    out["charging_point_effective"] = df["charging_point_effective"]
-    return out, logs
+        ev_b

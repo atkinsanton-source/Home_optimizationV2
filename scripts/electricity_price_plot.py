@@ -2,12 +2,35 @@ from pathlib import Path
 import sys
 import pandas as pd
 import matplotlib.pyplot as plt
+from matplotlib.lines import Line2D
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from home_energy_opt.config import EnergySystemConfig
+
+SCENARIO_DISPLAY_LABELS = [
+    "Commuter Profile",
+    "Noncommuter Profile",
+    "Noncommuter with 0.5 Battery Deg. Costs",
+    "Noncommuter with 0 Battery Deg. Costs",
+]
+
+POSTER_SCENARIO_LABELS = [
+    "Comparison Results with no \nVehicle To Home or Vehicle To Grid",
+    "Smart Charging",
+    "Smart Charging and \nVehicle To Home",
+    "Smart Charging, Vehicle To Home \n and Vehicle To Grid",
+]
+
+POSTER_MODEL_DISPLAY_LABELS = {
+    "baseline_static": "Instant Charging model\nwith Static tariff",
+    "baseline_dynamic": "Instant Charging model\nwith Dynamic tariff",
+    "mpc_static": "MPC model \nwith Static tariff",
+    "mpc_dynamic_v1": "MPC model \nwith Dynamic tariff",
+    "mpc": "MPC model \nwith Dynamic tariff",
+}
 
 
 
@@ -434,15 +457,6 @@ def plot_carpet_plots(output_folder_path):
         print(f"No scenario folders with mpc_results.csv found in {output_folder_path}")
         return
 
-    def get_scenario_label(scenario_name):
-        if "0.5degcost" in scenario_name:
-            return "Noncommuter with 0.5 Battery Deg. Costs"
-        if "0deg" in scenario_name:
-            return "Noncommuter with 0 Battery Deg. Costs"
-        if "Noncommuter" in scenario_name:
-            return "Noncommuter Profile"
-        return "Commuter Profile"
-
     carpet_spec_groups = [carpet_specs[:3], carpet_specs[3:]]
 
     for carpet_group in carpet_spec_groups:
@@ -485,7 +499,8 @@ def plot_carpet_plots(output_folder_path):
 
                 if row_index == 0:
                     axes[row_index, column_index].text(0.5, 1.10, scenario_path.name, ha="center", va="bottom", fontsize=6, transform=axes[row_index, column_index].transAxes)
-                    axes[row_index, column_index].text(0.5, 1.03, get_scenario_label(scenario_path.name), ha="center", va="bottom", fontsize=8, fontweight="bold", transform=axes[row_index, column_index].transAxes)
+                    scenario_label = SCENARIO_DISPLAY_LABELS[column_index] if column_index < len(SCENARIO_DISPLAY_LABELS) else scenario_path.name
+                    axes[row_index, column_index].text(0.5, 1.03, scenario_label, ha="center", va="bottom", fontsize=8, fontweight="bold", transform=axes[row_index, column_index].transAxes)
 
         for row_index, (title, colorbar_label, _, _, _, _, _) in enumerate(carpet_group):
             colorbar = fig.colorbar(row_images[row_index], ax=axes[row_index, :], fraction=0.015, pad=0.01)
@@ -536,7 +551,8 @@ def plot_carpet_plots(output_folder_path):
             axes[row_index, column_index].set_xlabel("Month")
 
             axes[row_index, column_index].text(0.5, 1.10, scenario_path.name, ha="center", va="bottom", fontsize=6, transform=axes[row_index, column_index].transAxes)
-            axes[row_index, column_index].text(0.5, 1.03, get_scenario_label(scenario_path.name), ha="center", va="bottom", fontsize=8, fontweight="bold", transform=axes[row_index, column_index].transAxes)
+            scenario_label = SCENARIO_DISPLAY_LABELS[column_index] if column_index < len(SCENARIO_DISPLAY_LABELS) else scenario_path.name
+            axes[row_index, column_index].text(0.5, 1.03, scenario_label, ha="center", va="bottom", fontsize=8, fontweight="bold", transform=axes[row_index, column_index].transAxes)
 
     for row_index, (title, colorbar_label, _, _, _, _, _) in enumerate(profitability_specs):
         colorbar = fig.colorbar(row_images[row_index], ax=axes[row_index, :], fraction=0.015, pad=0.01)
@@ -546,21 +562,42 @@ def plot_carpet_plots(output_folder_path):
 
     return
 
-def plot_costs_and_revenues(cost_and_revenue_data):
+def _plot_costs_and_revenues_ordered(
+    cost_and_revenue_data,
+    scenario_labels,
+    title,
+    scenario_name_y=-0.20,
+    show_scenario_name=True,
+    model_display_labels=None,
+    title_fontsize=14,
+    ylabel_fontsize=10,
+    xtick_fontsize=8,
+    scenario_label_fontsize=8,
+    scenario_name_fontsize=7,
+    x_label_rotation=35,
+    x_label_ha="right",
+    public_charge_color="#f28e2b",
+    ev_battery_degradation_color="#b8860b",
+    workplace_charge_label="Workplace charge cost",
+    bar_figsize=(14, 7),
+    title_loc="center",
+    net_label_fontsize=6.5,
+    bar_value_fontsize=9,
+    total_value_fontsize=9,
+    revenue_value_fontsize=9,
+):
     models = ["baseline_static", "baseline_dynamic", "mpc_static", "mpc_dynamic_v1", "mpc"]
-    model_display_labels = {
-        "baseline_static": "Static Baseline",
-        "baseline_dynamic": "Dyn. Baseline",
-        "mpc_static": "Static MPC",
-        "mpc_dynamic_v1": "Dyn. MPC v1",
-        "mpc": "Dyn. MPC",
-    }
+    if model_display_labels is None:
+        model_display_labels = {
+            "baseline_static": "Static Baseline",
+            "baseline_dynamic": "Dyn. Baseline",
+            "mpc_static": "Static MPC",
+            "mpc_dynamic_v1": "Dyn. MPC v1",
+            "mpc": "Dyn. MPC",
+        }
 
-    cost_and_revenue_data = cost_and_revenue_data.copy()
-    cost_and_revenue_data["model"] = pd.Categorical(cost_and_revenue_data["model"], categories=models, ordered=True)
-    cost_and_revenue_data = cost_and_revenue_data.sort_values(["scenario", "model"]).reset_index(drop=True)
-    scenarios = cost_and_revenue_data["scenario"].unique()
-    scenario_labels = ["Commuter Profile", "Noncommuter Profile", "Noncommuter with 0.5 Battery Deg. Costs", "Noncommuter with 0 Battery Deg. Costs"]
+    cost_and_revenue_data = cost_and_revenue_data.copy().reset_index(drop=True)
+    scenarios = list(dict.fromkeys(cost_and_revenue_data["scenario"].tolist()))
 
     x_labels = [
         model_display_labels.get(row.model, row.model)
@@ -584,20 +621,20 @@ def plot_costs_and_revenues(cost_and_revenue_data):
     bar_gap = 0.04
     bar_style = {"edgecolor": "black", "linewidth": 0.8}
 
-    fig, ax = plt.subplots(figsize=(14, 7))
+    fig, ax = plt.subplots(figsize=bar_figsize)
 
     bars_home_load = ax.bar(x, home_load_costs, width=width, label="Home load cost", color="#7f7f7f", **bar_style)
 
-    bars_public_charge = ax.bar(x, public_charge_costs, width=width, bottom=home_load_costs, label="Public charge cost", color="#f28e2b", **bar_style)
+    bars_public_charge = ax.bar(x, public_charge_costs, width=width, bottom=home_load_costs, label="Public charge cost", color=public_charge_color, **bar_style)
 
     bottom_workplace_charge = [a + b for a, b in zip(home_load_costs, public_charge_costs)]
-    bars_workplace_charge = ax.bar(x, workplace_charge_costs, width=width, bottom=bottom_workplace_charge, label="Workplace charge cost", color="#ffbe7d", **bar_style)
+    bars_workplace_charge = ax.bar(x, workplace_charge_costs, width=width, bottom=bottom_workplace_charge, label=workplace_charge_label if any(value != 0 for value in workplace_charge_costs) else "_nolegend_", color="#ffbe7d", **bar_style)
 
     bottom_fast_charge = [a + b for a, b in zip(bottom_workplace_charge, workplace_charge_costs)]
     bars_fast_charge = ax.bar(x, fast_charge_costs, width=width, bottom=bottom_fast_charge, label="EV Fast Charge Cost", color="#d65f00", **bar_style)
 
     bottom_ev_battery_deg = [a + b for a, b in zip(home_load_costs, external_charge_costs)]
-    bars_ev_battery_deg = ax.bar(x, ev_battery_degradation_costs, width=width, bottom=bottom_ev_battery_deg, label="EV battery degradation cost", color="#b8860b", **bar_style)
+    bars_ev_battery_deg = ax.bar(x, ev_battery_degradation_costs, width=width, bottom=bottom_ev_battery_deg, label="EV battery degradation cost", color=ev_battery_degradation_color, **bar_style)
 
     revenue_x = [value + width + bar_gap for value in x]
     bars_revenue = ax.bar(revenue_x, ev_discharge_grid_revenues, width=width, label="EV discharge grid revenue", color="#2ca02c", **bar_style)
@@ -615,27 +652,27 @@ def plot_costs_and_revenues(cost_and_revenue_data):
         else:
             ax.hlines(net_value, x_value - width / 2, x_value + width / 2, colors="#d62728", linewidth=2)
         if net_value > 100:
-            ax.text(x_value - width / 2 - 0.08, net_value, f"{net_value:.0f}", color="#d62728", fontsize=6.5, fontweight="bold", ha="right", va="center", bbox={"facecolor": "white", "edgecolor": "#d62728", "boxstyle": "square,pad=0.10"})
+            ax.text(x_value - width / 2 - 0.08, net_value, f"{net_value:.0f}", color="#d62728", fontsize=net_label_fontsize, fontweight="bold", ha="right", va="center", bbox={"facecolor": "white", "edgecolor": "#d62728", "boxstyle": "square,pad=0.10"})
 
     for x_value, total_cost in zip(x, total_costs):
         if total_cost > 100:
-            ax.text(x_value, total_cost + 7, f"{total_cost:.0f}", color="black", fontsize=9, fontweight="bold", ha="center", va="bottom")
+            ax.text(x_value, total_cost + 7, f"{total_cost:.0f}", color="black", fontsize=total_value_fontsize, fontweight="bold", ha="center", va="bottom")
 
     for x_value, revenue in zip(revenue_x, ev_discharge_grid_revenues):
         if revenue > 100:
-            ax.text(x_value, revenue + 5, f"{revenue:.0f}", color="black", fontsize=9, fontweight="bold", ha="center", va="bottom")
+            ax.text(x_value, revenue + 5, f"{revenue:.0f}", color="black", fontsize=revenue_value_fontsize, fontweight="bold", ha="center", va="bottom")
 
-    ax.bar_label(bars_home_load, labels=[f"{value:.0f}" if value > 100 else "" for value in home_load_costs], label_type="center", fontsize=7)
-    ax.bar_label(bars_public_charge, labels=[f"{value:.0f}" if value > 100 else "" for value in public_charge_costs], label_type="center", fontsize=7)
-    ax.bar_label(bars_workplace_charge, labels=[f"{value:.0f}" if value > 100 else "" for value in workplace_charge_costs], label_type="center", fontsize=7)
-    ax.bar_label(bars_fast_charge, labels=[f"{value:.0f}" if value > 100 else "" for value in fast_charge_costs], label_type="center", fontsize=7)
-    ax.bar_label(bars_ev_battery_deg, labels=[f"{value:.0f}" if value > 100 else "" for value in ev_battery_degradation_costs], label_type="center", fontsize=7)
-    ax.bar_label(bars_revenue, labels=[f"{value:.0f}" if value > 100 else "" for value in ev_discharge_grid_revenues], label_type="center", fontsize=7)
+    ax.bar_label(bars_home_load, labels=[f"{value:.0f}" if value > 100 else "" for value in home_load_costs], label_type="center", fontsize=bar_value_fontsize)
+    ax.bar_label(bars_public_charge, labels=[f"{value:.0f}" if value > 100 else "" for value in public_charge_costs], label_type="center", fontsize=bar_value_fontsize)
+    ax.bar_label(bars_workplace_charge, labels=[f"{value:.0f}" if value > 100 else "" for value in workplace_charge_costs], label_type="center", fontsize=bar_value_fontsize)
+    ax.bar_label(bars_fast_charge, labels=[f"{value:.0f}" if value > 100 else "" for value in fast_charge_costs], label_type="center", fontsize=bar_value_fontsize)
+    ax.bar_label(bars_ev_battery_deg, labels=[f"{value:.0f}" if value > 100 else "" for value in ev_battery_degradation_costs], label_type="center", fontsize=bar_value_fontsize)
+    ax.bar_label(bars_revenue, labels=[f"{value:.0f}" if value > 100 else "" for value in ev_discharge_grid_revenues], label_type="center", fontsize=bar_value_fontsize)
 
     ax.set_xticks([value + (width + bar_gap) / 2 for value in x])
-    ax.set_xticklabels(x_labels, fontsize=8, rotation=35, ha="right", rotation_mode="anchor")
-    ax.set_ylabel("Operational costs / revenues (€)", fontweight="bold")
-    ax.set_title("Costs and revenues (2025)")
+    ax.set_xticklabels(x_labels, fontsize=xtick_fontsize, rotation=x_label_rotation, ha=x_label_ha, rotation_mode="anchor")
+    ax.set_ylabel("Operational costs / revenues (€)", fontweight="bold", fontsize=ylabel_fontsize)
+    ax.set_title(title, fontsize=title_fontsize, fontweight="bold", loc=title_loc)
     for scenario_index, scenario in enumerate(scenarios):
         scenario_rows = cost_and_revenue_data.index[cost_and_revenue_data["scenario"] == scenario].tolist()
         scenario_start = scenario_rows[0]
@@ -646,8 +683,9 @@ def plot_costs_and_revenues(cost_and_revenue_data):
             next_pair_left = x[scenario_start] - width / 2
             separator_x = (previous_pair_right + next_pair_left) / 2
             ax.axvline(separator_x, color="gray", linestyle="--", linewidth=1, alpha=0.5)
-        ax.text(scenario_center, -0.11, scenario_labels[scenario_index], ha="center", va="top", fontsize=8, fontweight="bold", transform=ax.get_xaxis_transform())
-        ax.text(scenario_center, -0.20, scenario, ha="center", va="top", fontsize=7, transform=ax.get_xaxis_transform())
+        ax.text(scenario_center, -0.11, scenario_labels[scenario_index], ha="center", va="top", fontsize=scenario_label_fontsize, fontweight="bold", transform=ax.get_xaxis_transform())
+        if show_scenario_name:
+            ax.text(scenario_center, scenario_name_y, scenario, ha="center", va="top", fontsize=scenario_name_fontsize, transform=ax.get_xaxis_transform())
     
     ax.legend(loc="upper left", bbox_to_anchor=(1.02, 1))
     ax.set_axisbelow(True)
@@ -659,22 +697,142 @@ def plot_costs_and_revenues(cost_and_revenue_data):
     return
 
 
-def plot_energy_sinks_sources(cost_and_revenue_data):
+def plot_costs_and_revenues(cost_and_revenue_data):
     models = ["baseline_static", "baseline_dynamic", "mpc_static", "mpc_dynamic_v1", "mpc"]
-    model_display_labels = {
-        "baseline_static": "Static Baseline",
-        "baseline_dynamic": "Dyn. Baseline",
-        "mpc_static": "Static MPC",
-        "mpc_dynamic_v1": "Dyn. MPC V1",
-        "mpc": "Dyn. MPC",
-    }
 
     cost_and_revenue_data = cost_and_revenue_data.copy()
     cost_and_revenue_data["model"] = pd.Categorical(cost_and_revenue_data["model"], categories=models, ordered=True)
     cost_and_revenue_data = cost_and_revenue_data.sort_values(["scenario", "model"]).reset_index(drop=True)
-    scenarios = cost_and_revenue_data["scenario"].unique()
-    scenario_labels = ["Commuter Profile", "Noncommuter Profile", "Noncommuter with 0.5 Battery Deg. Costs", "Noncommuter with 0 Battery Deg. Costs"]
-    
+
+    _plot_costs_and_revenues_ordered(
+        cost_and_revenue_data,
+        SCENARIO_DISPLAY_LABELS,
+        "Costs and revenues (2025)",
+    )
+
+    return
+
+
+def plot_costs_and_revenues_poster(cost_and_revenue_data):
+    cost_and_revenue_data = cost_and_revenue_data.copy()
+    source_v2 = cost_and_revenue_data[
+        cost_and_revenue_data["scenario"] == "outputs_Tesla3_V2_79.5KWh_NonCommuter"
+    ]
+    source_v3 = cost_and_revenue_data[
+        cost_and_revenue_data["scenario"] == "outputs_Tesla3_V3_79.5KWh_NonCommuter"
+    ]
+
+    if source_v2.empty or source_v3.empty:
+        print("Missing V2 or V3 scenario data for the poster plot.")
+        return
+
+    poster_rows = []
+    display_order = 0
+
+    def add_row(source_data, scenario_label, model_name):
+        nonlocal display_order
+        row = source_data[source_data["model"] == model_name].head(1).copy()
+        if row.empty:
+            raise ValueError(f"Missing {model_name} row for poster plot in scenario data.")
+        row.loc[:, "scenario"] = scenario_label
+        row.loc[:, "display_order"] = display_order
+        display_order += 1
+        poster_rows.append(row)
+
+    for model_name in ["baseline_static", "baseline_dynamic"]:
+        add_row(source_v2, POSTER_SCENARIO_LABELS[0], model_name)
+    add_row(source_v2, POSTER_SCENARIO_LABELS[1], "mpc_dynamic_v1")
+    add_row(source_v2, POSTER_SCENARIO_LABELS[2], "mpc")
+    add_row(source_v3, POSTER_SCENARIO_LABELS[3], "mpc")
+
+    poster_data = pd.concat(poster_rows, ignore_index=True)
+    poster_data = poster_data.sort_values("display_order").reset_index(drop=True)
+
+    _plot_costs_and_revenues_ordered(
+        poster_data,
+        POSTER_SCENARIO_LABELS,
+        "Costs and Revenues Comparison",
+        scenario_name_y=-0.24,
+        model_display_labels=POSTER_MODEL_DISPLAY_LABELS,
+        title_fontsize=18,
+        ylabel_fontsize=13,
+        xtick_fontsize=11,
+        scenario_label_fontsize=11,
+        scenario_name_fontsize=9,
+        x_label_rotation=0,
+        x_label_ha="center",
+        public_charge_color="#f28e2b",
+        ev_battery_degradation_color="#1f4e99",
+        workplace_charge_label="_nolegend_",
+        bar_figsize=(18, 8),
+        title_loc="center",
+        net_label_fontsize=12,
+        bar_value_fontsize=12,
+        total_value_fontsize=12,
+        revenue_value_fontsize=12,
+        show_scenario_name=False,
+    )
+
+    return
+
+
+def _plot_energy_sinks_sources_ordered(
+    cost_and_revenue_data,
+    scenario_labels,
+    title,
+    show_scenario_name=True,
+    model_display_labels=None,
+    title_fontsize=14,
+    ylabel_fontsize=10,
+    xtick_fontsize=8,
+    scenario_label_fontsize=8,
+    scenario_name_fontsize=7,
+    x_label_rotation=35,
+    x_label_ha="right",
+    bar_figsize=(14, 7),
+    title_loc="center",
+    bar_value_fontsize=7,
+    total_value_fontsize=11,
+    legend_fontsize=8,
+    show_workplace_charge_label=True,
+    workplace_charge_label="EV Workplace Charge",
+    ylabel_text="KWh",
+    legend_title=None,
+    legend_label_map=None,
+    legend_sections=None,
+    grid_color="lightgray",
+    grid_linestyle="--",
+    grid_linewidth=1,
+    grid_alpha=0.8,
+    grid_axisbelow=True,
+    grid_import_color="grey",
+    public_charge_color="#f28e2b",
+    workplace_charge_color="#ffbe7d",
+    fast_charge_color="#d65f00",
+    initial_energy_color="lightgreen",
+    home_load_color="orange",
+    consumption_color="blue",
+    discharge_home_color=None,
+    discharge_grid_color=None,
+    charging_losses_color=None,
+    discharging_losses_color=None,
+    final_energy_color="darkgreen",
+):
+    models = ["baseline_static", "baseline_dynamic", "mpc_static", "mpc_dynamic_v1", "mpc"]
+    if model_display_labels is None:
+        model_display_labels = {
+            "baseline_static": "Static Baseline",
+            "baseline_dynamic": "Dyn. Baseline",
+            "mpc_static": "Static MPC",
+            "mpc_dynamic_v1": "Dyn. MPC V1",
+            "mpc": "Dyn. MPC",
+        }
+    if legend_label_map is None:
+        legend_label_map = {}
+
+    cost_and_revenue_data = cost_and_revenue_data.copy().reset_index(drop=True)
+    scenarios = list(dict.fromkeys(cost_and_revenue_data["scenario"].tolist()))
+
     x_labels = [
         model_display_labels.get(row.model, row.model)
         for row in cost_and_revenue_data.itertuples()
@@ -701,78 +859,80 @@ def plot_energy_sinks_sources(cost_and_revenue_data):
     total_ev_discharged = [a + b for a, b in zip(ev_discharge_home_kwh, ev_discharge_grid_kwh)]
     ev_discharging_losses = [(value / 0.92) - value for value in total_ev_discharged]
 
-
-
     model_gap = 0.12
     x = [value * (1 + model_gap) for value in range(len(x_labels))]
     width = 0.4
     bar_gap = 0.04
     bar_style = {"edgecolor": "black", "linewidth": 0.8}
 
-    fig, ax = plt.subplots(figsize=(14, 7))
+    fig, ax = plt.subplots(figsize=bar_figsize)
 
-    #Energy in bar
-    bars_grid_import_kwh = ax.bar(x, grid_import_kwh, width=width, label="Grid Import", color="grey", **bar_style)
+    if discharge_home_color is None:
+        discharge_home_color = "#4f8cc9"
+    if discharge_grid_color is None:
+        discharge_grid_color = "#3a7d44"
+    if charging_losses_color is None:
+        charging_losses_color = "#d98c5f"
+    if discharging_losses_color is None:
+        discharging_losses_color = "#f1c27d"
+
+    bars_grid_import_kwh = ax.bar(x, grid_import_kwh, width=width, label=legend_label_map.get("grid_import", "Grid Import"), color=grid_import_color, **bar_style)
 
     bottom_ev_external_charge = grid_import_kwh
-    bars_ev_public_charge = ax.bar(x, ev_public_charge_kwh, bottom=bottom_ev_external_charge, width=width, label="EV Public Charge", color="#f28e2b", **bar_style)
+    bars_ev_public_charge = ax.bar(x, ev_public_charge_kwh, bottom=bottom_ev_external_charge, width=width, label=legend_label_map.get("ev_public_charge", "EV Public Charge"), color=public_charge_color, **bar_style)
 
-    bottom_ev_workplace_charge = [a+b for a,b in zip(bottom_ev_external_charge, ev_public_charge_kwh)]
-    bars_ev_workplace_charge = ax.bar(x, ev_workplace_charge_kwh, bottom=bottom_ev_workplace_charge, width=width, label="EV Workplace Charge", color="#ffbe7d", **bar_style)
+    bottom_ev_workplace_charge = [a + b for a, b in zip(bottom_ev_external_charge, ev_public_charge_kwh)]
+    workplace_label = workplace_charge_label if (show_workplace_charge_label and any(value != 0 for value in ev_workplace_charge_kwh)) else "_nolegend_"
+    bars_ev_workplace_charge = ax.bar(x, ev_workplace_charge_kwh, bottom=bottom_ev_workplace_charge, width=width, label=legend_label_map.get("ev_workplace_charge", workplace_label), color=workplace_charge_color, **bar_style)
 
-    bottom_ev_fast_charge = [a+b for a,b in zip(bottom_ev_workplace_charge, ev_workplace_charge_kwh)]
-    bars_ev_fast_charge = ax.bar(x, ev_fast_charge_kwh, bottom=bottom_ev_fast_charge, width=width, label="EV Fast Charge", color="#d65f00", **bar_style)
+    bottom_ev_fast_charge = [a + b for a, b in zip(bottom_ev_workplace_charge, ev_workplace_charge_kwh)]
+    bars_ev_fast_charge = ax.bar(x, ev_fast_charge_kwh, bottom=bottom_ev_fast_charge, width=width, label=legend_label_map.get("ev_fast_charge", "EV Fast Charge"), color=fast_charge_color, **bar_style)
 
-    bottom_ev_initial_energy = [a+b for a,b in zip(grid_import_kwh, ev_external_charge_kwh)]
-    bars_ev_initial_energy = ax.bar(x, ev_initial_energy_kwh, bottom=bottom_ev_initial_energy, width=width, label="EV Initial Energy", color="lightgreen", **bar_style)
+    bottom_ev_initial_energy = [a + b for a, b in zip(grid_import_kwh, ev_external_charge_kwh)]
+    bars_ev_initial_energy = ax.bar(x, ev_initial_energy_kwh, bottom=bottom_ev_initial_energy, width=width, label=legend_label_map.get("ev_initial_energy", "EV Initial Energy"), color=initial_energy_color, **bar_style)
 
-    #Energy Out bar
     energy_out_x = [value + width + bar_gap for value in x]
-    bars_home_load_kwh = ax.bar(energy_out_x, home_load_grid_import_kwh, width=width, label="Home Load From Grid", color="orange", **bar_style)
-    bars_ev_consumption_kwh = ax.bar(energy_out_x, ev_consumption_kwh, bottom=home_load_grid_import_kwh, width=width, label="EV Consumption", color="blue", **bar_style)
-    
-    bottom_ev_discharge_home = [a+b for a,b in zip(home_load_grid_import_kwh, ev_consumption_kwh)]
-    bars_ev_discharge_home_kwh = ax.bar(energy_out_x, ev_discharge_home_kwh, bottom=bottom_ev_discharge_home, width=width, label="EV Discharge To Home", **bar_style)
+    bars_home_load_kwh = ax.bar(energy_out_x, home_load_grid_import_kwh, width=width, label=legend_label_map.get("home_load", "Home Load From Grid"), color=home_load_color, **bar_style)
+    bars_ev_consumption_kwh = ax.bar(energy_out_x, ev_consumption_kwh, bottom=home_load_grid_import_kwh, width=width, label=legend_label_map.get("ev_consumption", "EV Consumption"), color=consumption_color, **bar_style)
 
-    bottom_ev_discharge_grid = [a+b+c for a,b,c in zip(home_load_grid_import_kwh, ev_consumption_kwh, ev_discharge_home_kwh)]
-    bars_ev_discharge_grid_kwh = ax.bar(energy_out_x, ev_discharge_grid_kwh, bottom=bottom_ev_discharge_grid, width=width, label="EV Discharge To Grid", **bar_style)
+    bottom_ev_discharge_home = [a + b for a, b in zip(home_load_grid_import_kwh, ev_consumption_kwh)]
+    bars_ev_discharge_home_kwh = ax.bar(energy_out_x, ev_discharge_home_kwh, bottom=bottom_ev_discharge_home, width=width, label=legend_label_map.get("ev_discharge_home", "EV Discharge To Home"), color=discharge_home_color, **bar_style)
 
-    bottom_charging_losses = [a+b+c+d for a,b,c,d in zip(home_load_grid_import_kwh, ev_consumption_kwh, ev_discharge_home_kwh, ev_discharge_grid_kwh)]
-    bars_ev_charging_losses = ax.bar(energy_out_x, ev_charging_losses, bottom=bottom_charging_losses, width=width, label="EV Charging Losses", **bar_style)
+    bottom_ev_discharge_grid = [a + b + c for a, b, c in zip(home_load_grid_import_kwh, ev_consumption_kwh, ev_discharge_home_kwh)]
+    bars_ev_discharge_grid_kwh = ax.bar(energy_out_x, ev_discharge_grid_kwh, bottom=bottom_ev_discharge_grid, width=width, label=legend_label_map.get("ev_discharge_grid", "EV Discharge To Grid"), color=discharge_grid_color, **bar_style)
 
-    bottom_discharging_losses = [a+b for a,b in zip(bottom_charging_losses, ev_charging_losses)]
-    bars_ev_discharging_losses = ax.bar(energy_out_x, ev_discharging_losses, bottom=bottom_discharging_losses, width=width, label="EV Discharging Losses", **bar_style)
+    bottom_charging_losses = [a + b + c + d for a, b, c, d in zip(home_load_grid_import_kwh, ev_consumption_kwh, ev_discharge_home_kwh, ev_discharge_grid_kwh)]
+    bars_ev_charging_losses = ax.bar(energy_out_x, ev_charging_losses, bottom=bottom_charging_losses, width=width, label=legend_label_map.get("ev_charging_losses", "EV Charging Losses"), color=charging_losses_color, **bar_style)
 
-    bottom_ev_final_energy = [a+b for a,b in zip(bottom_discharging_losses, ev_discharging_losses)]
-    bars_ev_final_energy = ax.bar(energy_out_x, ev_final_energy_kwh, bottom=bottom_ev_final_energy, width=width, label="EV Final Energy", color="darkgreen", **bar_style)
-    
-    #Total Energy Consumed
-    total_energy_out = [a+b+c+d+e+f+g for a,b,c,d,e,f,g in zip(home_load_grid_import_kwh, ev_consumption_kwh, ev_discharge_home_kwh, ev_discharge_grid_kwh, ev_charging_losses, ev_discharging_losses, ev_final_energy_kwh)]
-    
-    #Description for total energy out above the bar pair
+    bottom_discharging_losses = [a + b for a, b in zip(bottom_charging_losses, ev_charging_losses)]
+    bars_ev_discharging_losses = ax.bar(energy_out_x, ev_discharging_losses, bottom=bottom_discharging_losses, width=width, label=legend_label_map.get("ev_discharging_losses", "EV Discharging Losses"), color=discharging_losses_color, **bar_style)
+
+    bottom_ev_final_energy = [a + b for a, b in zip(bottom_discharging_losses, ev_discharging_losses)]
+    bars_ev_final_energy = ax.bar(energy_out_x, ev_final_energy_kwh, bottom=bottom_ev_final_energy, width=width, label=legend_label_map.get("ev_final_energy", "EV Final Energy"), color=final_energy_color, **bar_style)
+
+    total_energy_out = [a + b + c + d + e + f + g for a, b, c, d, e, f, g in zip(home_load_grid_import_kwh, ev_consumption_kwh, ev_discharge_home_kwh, ev_discharge_grid_kwh, ev_charging_losses, ev_discharging_losses, ev_final_energy_kwh)]
+
     for x_value, total_energy_out in zip(energy_out_x, total_energy_out):
         label_x = x_value - ((width + bar_gap) / 2)
-        ax.text(label_x, total_energy_out + 7, f"{total_energy_out:.0f}", color="black", fontsize=11, fontweight="bold", ha="center", va="bottom")
-    
-    #Plot bars
-    ax.bar_label(bars_ev_initial_energy, labels=[f"{value:.0f}" if value >= 200 else "" for value in ev_initial_energy_kwh], label_type="center", fontsize=7)
-    ax.bar_label(bars_grid_import_kwh, labels=[f"{value:.0f}" if value >= 200 else "" for value in grid_import_kwh], label_type="center", fontsize=7)
-    ax.bar_label(bars_ev_public_charge, labels=[f"{value:.0f}" if value >= 200 else "" for value in ev_public_charge_kwh], label_type="center", fontsize=7)
-    ax.bar_label(bars_ev_workplace_charge, labels=[f"{value:.0f}" if value >= 200 else "" for value in ev_workplace_charge_kwh], label_type="center", fontsize=7)
-    ax.bar_label(bars_ev_fast_charge, labels=[f"{value:.0f}" if value >= 200 else "" for value in ev_fast_charge_kwh], label_type="center", fontsize=7)
-    ax.bar_label(bars_home_load_kwh, labels=[f"{value:.0f}" if value >= 200 else "" for value in home_load_grid_import_kwh], label_type="center", fontsize=7)
-    ax.bar_label(bars_ev_consumption_kwh, labels=[f"{value:.0f}" if value >= 200 else "" for value in ev_consumption_kwh], label_type="center", fontsize=7)
-    ax.bar_label(bars_ev_discharge_home_kwh, labels=[f"{value:.0f}" if value >= 200 else "" for value in ev_discharge_home_kwh], label_type="center", fontsize=7)
-    ax.bar_label(bars_ev_discharge_grid_kwh, labels=[f"{value:.0f}" if value >= 200 else "" for value in ev_discharge_grid_kwh], label_type="center", fontsize=7)
-    ax.bar_label(bars_ev_charging_losses, labels=[f"{value:.0f}" if value >= 200 else "" for value in ev_charging_losses], label_type="center", fontsize=7)
-    ax.bar_label(bars_ev_discharging_losses, labels=[f"{value:.0f}" if value >= 200 else "" for value in ev_discharging_losses], label_type="center", fontsize=7)
-    ax.bar_label(bars_ev_final_energy, labels=[f"{value:.0f}" if value >= 200 else "" for value in ev_final_energy_kwh], label_type="center", fontsize=7)
+        ax.text(label_x, total_energy_out + 7, f"{total_energy_out:.0f}", color="black", fontsize=total_value_fontsize, fontweight="bold", ha="center", va="bottom")
 
-    #Naming plot and adding labels
+    ax.bar_label(bars_ev_initial_energy, labels=[f"{value:.0f}" if value >= 200 else "" for value in ev_initial_energy_kwh], label_type="center", fontsize=bar_value_fontsize)
+    ax.bar_label(bars_grid_import_kwh, labels=[f"{value:.0f}" if value >= 200 else "" for value in grid_import_kwh], label_type="center", fontsize=bar_value_fontsize)
+    ax.bar_label(bars_ev_public_charge, labels=[f"{value:.0f}" if value >= 200 else "" for value in ev_public_charge_kwh], label_type="center", fontsize=bar_value_fontsize)
+    ax.bar_label(bars_ev_workplace_charge, labels=[f"{value:.0f}" if value >= 200 else "" for value in ev_workplace_charge_kwh], label_type="center", fontsize=bar_value_fontsize)
+    ax.bar_label(bars_ev_fast_charge, labels=[f"{value:.0f}" if value >= 200 else "" for value in ev_fast_charge_kwh], label_type="center", fontsize=bar_value_fontsize)
+    ax.bar_label(bars_home_load_kwh, labels=[f"{value:.0f}" if value >= 200 else "" for value in home_load_grid_import_kwh], label_type="center", fontsize=bar_value_fontsize)
+    ax.bar_label(bars_ev_consumption_kwh, labels=[f"{value:.0f}" if value >= 200 else "" for value in ev_consumption_kwh], label_type="center", fontsize=bar_value_fontsize)
+    ax.bar_label(bars_ev_discharge_home_kwh, labels=[f"{value:.0f}" if value >= 200 else "" for value in ev_discharge_home_kwh], label_type="center", fontsize=bar_value_fontsize)
+    ax.bar_label(bars_ev_discharge_grid_kwh, labels=[f"{value:.0f}" if value >= 200 else "" for value in ev_discharge_grid_kwh], label_type="center", fontsize=bar_value_fontsize)
+    ax.bar_label(bars_ev_charging_losses, labels=[f"{value:.0f}" if value >= 200 else "" for value in ev_charging_losses], label_type="center", fontsize=bar_value_fontsize)
+    ax.bar_label(bars_ev_discharging_losses, labels=[f"{value:.0f}" if value >= 200 else "" for value in ev_discharging_losses], label_type="center", fontsize=bar_value_fontsize)
+    ax.bar_label(bars_ev_final_energy, labels=[f"{value:.0f}" if value >= 200 else "" for value in ev_final_energy_kwh], label_type="center", fontsize=bar_value_fontsize)
+
     ax.set_xticks([value + (width + bar_gap) / 2 for value in x])
-    ax.set_xticklabels(x_labels, fontsize=8, rotation=35, ha="right", rotation_mode="anchor")
-    ax.set_ylabel("KWh", fontweight="bold")
-    ax.set_title("Energy Sources and Sinks for Driver Profiles with a Tesla Model 3")
+    ax.set_xticklabels(x_labels, fontsize=xtick_fontsize, rotation=x_label_rotation, ha=x_label_ha, rotation_mode="anchor")
+    ax.set_ylabel(ylabel_text, fontweight="bold", fontsize=ylabel_fontsize)
+    ax.set_title(title, fontsize=title_fontsize, fontweight="bold", loc=title_loc)
 
     for scenario_index, scenario in enumerate(scenarios):
         scenario_rows = cost_and_revenue_data.index[cost_and_revenue_data["scenario"] == scenario].tolist()
@@ -784,14 +944,170 @@ def plot_energy_sinks_sources(cost_and_revenue_data):
             next_pair_left = x[scenario_start] - width / 2
             separator_x = (previous_pair_right + next_pair_left) / 2
             ax.axvline(separator_x, color="gray", linestyle="--", linewidth=1, alpha=0.5)
-        ax.text(scenario_center, -0.11, scenario_labels[scenario_index], ha="center", va="top", fontsize=8, fontweight="bold", transform=ax.get_xaxis_transform())
-        ax.text(scenario_center, -0.20, scenario, ha="center", va="top", fontsize=7, transform=ax.get_xaxis_transform())
+        ax.text(scenario_center, -0.11, scenario_labels[scenario_index], ha="center", va="top", fontsize=scenario_label_fontsize, fontweight="bold", transform=ax.get_xaxis_transform())
+        if show_scenario_name:
+            ax.text(scenario_center, -0.20, scenario, ha="center", va="top", fontsize=scenario_name_fontsize, transform=ax.get_xaxis_transform())
 
-    ax.legend(loc="upper left", bbox_to_anchor=(1.02, 1))
-    ax.grid(True, axis="y", alpha=0.3)
+    if legend_sections:
+        handle_map = {
+            "grid_import": bars_grid_import_kwh,
+            "ev_public_charge": bars_ev_public_charge,
+            "ev_workplace_charge": bars_ev_workplace_charge,
+            "ev_fast_charge": bars_ev_fast_charge,
+            "ev_initial_energy": bars_ev_initial_energy,
+            "home_load": bars_home_load_kwh,
+            "ev_consumption": bars_ev_consumption_kwh,
+            "ev_discharge_home": bars_ev_discharge_home_kwh,
+            "ev_discharge_grid": bars_ev_discharge_grid_kwh,
+            "ev_charging_losses": bars_ev_charging_losses,
+            "ev_discharging_losses": bars_ev_discharging_losses,
+            "ev_final_energy": bars_ev_final_energy,
+        }
+        legend_handles = []
+        legend_labels = []
+        for section_title, keys in legend_sections:
+            legend_handles.append(Line2D([], [], linestyle="none", marker=None, alpha=0))
+            legend_labels.append(section_title)
+            for key in keys:
+                handle = handle_map.get(key)
+                if handle is None:
+                    continue
+                handle_label = handle.get_label()
+                if handle_label == "_nolegend_":
+                    continue
+                legend_handles.append(handle)
+                legend_labels.append(legend_label_map.get(key, handle_label))
+        legend = ax.legend(legend_handles, legend_labels, loc="upper left", bbox_to_anchor=(1.02, 1), fontsize=legend_fontsize, title=legend_title)
+        for text in legend.get_texts():
+            if text.get_text() in {section_title for section_title, _ in legend_sections}:
+                text.set_fontweight("bold")
+    else:
+        ax.legend(loc="upper left", bbox_to_anchor=(1.02, 1), fontsize=legend_fontsize, title=legend_title)
+    ax.set_axisbelow(grid_axisbelow)
+    ax.grid(True, axis="y", color=grid_color, linestyle=grid_linestyle, linewidth=grid_linewidth, alpha=grid_alpha)
 
     plt.tight_layout()
     plt.show()
+
+    return
+
+
+def plot_energy_sinks_sources(cost_and_revenue_data):
+    models = ["baseline_static", "baseline_dynamic", "mpc_static", "mpc_dynamic_v1", "mpc"]
+    model_display_labels = {
+        "baseline_static": "Static Baseline",
+        "baseline_dynamic": "Dyn. Baseline",
+        "mpc_static": "Static MPC",
+        "mpc_dynamic_v1": "Dyn. MPC V1",
+        "mpc": "Dyn. MPC",
+    }
+
+    cost_and_revenue_data = cost_and_revenue_data.copy()
+    cost_and_revenue_data["model"] = pd.Categorical(cost_and_revenue_data["model"], categories=models, ordered=True)
+    cost_and_revenue_data = cost_and_revenue_data.sort_values(["scenario", "model"]).reset_index(drop=True)
+
+    _plot_energy_sinks_sources_ordered(
+        cost_and_revenue_data,
+        SCENARIO_DISPLAY_LABELS,
+        "Energy Sources and Sinks for Driver Profiles with a Tesla Model 3",
+        model_display_labels=model_display_labels,
+    )
+
+    return
+
+
+def plot_energy_sinks_sources_poster(cost_and_revenue_data):
+    cost_and_revenue_data = cost_and_revenue_data.copy()
+    source_v2 = cost_and_revenue_data[
+        cost_and_revenue_data["scenario"] == "outputs_Tesla3_V2_79.5KWh_NonCommuter"
+    ]
+    source_v3 = cost_and_revenue_data[
+        cost_and_revenue_data["scenario"] == "outputs_Tesla3_V3_79.5KWh_NonCommuter"
+    ]
+
+    if source_v2.empty or source_v3.empty:
+        print("Missing V2 or V3 scenario data for the energy poster plot.")
+        return
+
+    poster_rows = []
+    display_order = 0
+
+    def add_row(source_data, scenario_label, model_name):
+        nonlocal display_order
+        row = source_data[source_data["model"] == model_name].head(1).copy()
+        if row.empty:
+            raise ValueError(f"Missing {model_name} row for energy poster plot in scenario data.")
+        row.loc[:, "scenario"] = scenario_label
+        row.loc[:, "display_order"] = display_order
+        display_order += 1
+        poster_rows.append(row)
+
+    for model_name in ["baseline_static", "baseline_dynamic"]:
+        add_row(source_v2, POSTER_SCENARIO_LABELS[0], model_name)
+    add_row(source_v2, POSTER_SCENARIO_LABELS[1], "mpc_dynamic_v1")
+    add_row(source_v2, POSTER_SCENARIO_LABELS[2], "mpc")
+    add_row(source_v3, POSTER_SCENARIO_LABELS[3], "mpc")
+
+    poster_data = pd.concat(poster_rows, ignore_index=True)
+    poster_data = poster_data.sort_values("display_order").reset_index(drop=True)
+
+    _plot_energy_sinks_sources_ordered(
+        poster_data,
+        POSTER_SCENARIO_LABELS,
+        "Energy Sources and Sinks Comparison",
+        show_scenario_name=False,
+        model_display_labels=POSTER_MODEL_DISPLAY_LABELS,
+        title_fontsize=18,
+        ylabel_fontsize=13,
+        xtick_fontsize=11,
+        scenario_label_fontsize=11,
+        scenario_name_fontsize=9,
+        x_label_rotation=0,
+        x_label_ha="center",
+        bar_figsize=(18, 8),
+        title_loc="center",
+        bar_value_fontsize=12,
+        total_value_fontsize=12,
+        legend_fontsize=10,
+        show_workplace_charge_label=False,
+        workplace_charge_label="_nolegend_",
+        legend_title=None,
+        legend_label_map={
+            "grid_import": "Grid import",
+            "ev_public_charge": "Public charge",
+            "ev_fast_charge": "Fast charge",
+            "ev_initial_energy": "Initial EV energy",
+            "home_load": "Home load from grid",
+            "ev_consumption": "EV consumption",
+            "ev_discharge_home": "EV discharge to home",
+            "ev_discharge_grid": "EV discharge to grid",
+            "ev_charging_losses": "Charging losses",
+            "ev_discharging_losses": "Discharging losses",
+            "ev_final_energy": "Final EV energy",
+        },
+        legend_sections=[
+            ("Source", ["grid_import", "ev_public_charge", "ev_fast_charge", "ev_initial_energy"]),
+            ("Sink", ["home_load", "ev_consumption", "ev_discharge_home", "ev_discharge_grid", "ev_charging_losses", "ev_discharging_losses", "ev_final_energy"]),
+        ],
+        ylabel_text="Electrical energy (kWh)",
+        grid_color="lightgray",
+        grid_linestyle="--",
+        grid_linewidth=1,
+        grid_alpha=0.8,
+        grid_axisbelow=True,
+        grid_import_color="#8a8a8a",
+        public_charge_color="#f4d35e",
+        workplace_charge_color="#eac97a",
+        fast_charge_color="#e89b4a",
+        initial_energy_color="#8fd19e",
+        home_load_color="#9ad0f5",
+        consumption_color="#4f8cc9",
+        discharge_home_color="#3f6fb8",
+        discharge_grid_color="#43b047",
+        charging_losses_color="#e87c7c",
+        discharging_losses_color="#f1b96a",
+        final_energy_color="#2f8f4e",
+    )
 
     return
 
@@ -801,12 +1117,15 @@ def main():
     print("2: Energy Sources and Sinks")
     print("3: Costs and Revenue Analysis")
     print("4: Carpet plots")
-    choice = input("Enter 1, 2, 3 or 4: ")
+    print("5: Costs and Revenue Poster")
+    print("6: Energy Sources and Sinks Poster")
+    choice = input("Enter 1, 2, 3, 4, 5 or 6: ")
 
     #For the Electricity Price Data
-    results_data_path=("/Users/anton.atkins/Documents/TU Berlin/Bachelor Arbeit/code/New_ModelV2/Home_optimizationV2/outputs_incl_mpcdynamic/outputs_3_Tesla3_V3_79.5KWh_Noncommuter_incl_mpcdynamic_0.5degcost/mpc_results.csv")
+    results_data_path=("/Users/anton.atkins/Documents/TU Berlin/Bachelor Arbeit/code/New_ModelV2/Home_optimizationV2/Outputs_Systemintegration_kosten/outputs_Tesla3_V3_79.5KWh_NonCommuter/mpc_results.csv")
     initial_data_path=("/Users/anton.atkins/Documents/TU Berlin/Bachelor Arbeit/code/New_ModelV2/Home_optimizationV2/data/LPG_FlexEhome_2025_Tesla3_79.5_Commuter.csv")
-    output_folder_path = "/Users/anton.atkins/Documents/TU Berlin/Bachelor Arbeit/code/New_ModelV2/Home_optimizationV2/outputs_incl_mpcdynamic"
+    output_folder_path = "/Users/anton.atkins/Documents/TU Berlin/Bachelor Arbeit/code/New_ModelV2/Home_optimizationV2/Outputs_Systemintegration_kosten"
+    poster_output_folder_path = "/Users/anton.atkins/Documents/TU Berlin/Bachelor Arbeit/code/New_ModelV2/Home_optimizationV2/Outputs_Systemintegration_kosten"
 
     if choice == "1":
         data = ElectricityPriceData.from_csv(results_data_path, initial_data_path)
@@ -839,8 +1158,18 @@ def main():
     elif choice == "4":
         plot_carpet_plots(output_folder_path)
 
+    elif choice == "5":
+        wanted_columns_stacked = ["external_charge_public_cost_eur", "external_charge_workplace_cost_eur", "external_charge_fast75_cost_eur", "external_charge_fast150_cost_eur", "ev_battery_degradation_cost_eur", "ev_home_charge_cost_eur", "home_load_cost_eur", "ev_discharge_grid_revenue_eur"]
+        costs_revenue_metrics_combined_data = ElectricityPriceData.from_output_metrics(poster_output_folder_path, wanted_columns_stacked)
+        plot_costs_and_revenues_poster(costs_revenue_metrics_combined_data)
+
+    elif choice == "6":
+        wanted_columns = ["external_charge_public_kwh", "external_charge_workplace_kwh", "external_charge_fast75_kwh", "external_charge_fast150_kwh", "grid_import_kwh", "ev_consumption_kwh", "ev_discharge_to_home_kwh", "ev_discharge_to_grid_kwh", "home_load_grid_import_kwh", "home_ev_charge_kwh", "ev_initial_energy_kwh", "ev_final_energy_kwh"]
+        energy_metrics_combined_data = ElectricityPriceData.from_output_metrics(poster_output_folder_path, wanted_columns)
+        plot_energy_sinks_sources_poster(energy_metrics_combined_data)
+
     else:
-        print("Invalid choice. Please enter 1, 2, 3 or 4.")
+        print("Invalid choice. Please enter 1, 2, 3, 4, 5 or 6.")
 
 
     return
