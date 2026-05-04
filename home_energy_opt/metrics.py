@@ -8,6 +8,40 @@ EV_SOC_CLAMP_EPS_KWH = 1e-5
 EXTERNAL_CHARGING_POINTS = ("public", "workplace", "fast75", "fast150")
 
 
+def home_grid_import_kwh(home_load_kwh: pd.Series, ev_dis_to_home_kwh: pd.Series) -> pd.Series:
+    """Return the grid energy needed by the house after EV discharge offsets home load."""
+    home_load = pd.to_numeric(home_load_kwh, errors="coerce").fillna(0.0)
+    ev_dis_home = pd.to_numeric(ev_dis_to_home_kwh, errors="coerce").fillna(0.0)
+    return (home_load - ev_dis_home).clip(lower=0.0)
+
+
+def step_cost_eur(
+    home_grid_price: pd.Series,
+    home_load_kwh: pd.Series,
+    ev_dis_to_home_kwh: pd.Series,
+    ev_home_import_price: pd.Series,
+    ev_home_ch_kwh: pd.Series,
+    ext_charge_cost_eur: pd.Series,
+    ev_battery_degradation_cost_eur: pd.Series,
+    ev_discharge_grid_revenue_eur: pd.Series,
+) -> pd.Series:
+    """Shared operating-cost formula for all controller variants."""
+    home_grid_price = pd.to_numeric(home_grid_price, errors="coerce").fillna(0.0)
+    ev_home_import_price = pd.to_numeric(ev_home_import_price, errors="coerce").fillna(0.0)
+    ev_home_ch_kwh = pd.to_numeric(ev_home_ch_kwh, errors="coerce").fillna(0.0)
+    ext_charge_cost_eur = pd.to_numeric(ext_charge_cost_eur, errors="coerce").fillna(0.0)
+    ev_battery_degradation_cost_eur = pd.to_numeric(ev_battery_degradation_cost_eur, errors="coerce").fillna(0.0)
+    ev_discharge_grid_revenue_eur = pd.to_numeric(ev_discharge_grid_revenue_eur, errors="coerce").fillna(0.0)
+    home_net_grid_kwh = home_grid_import_kwh(home_load_kwh, ev_dis_to_home_kwh)
+    return (
+        home_grid_price * home_net_grid_kwh
+        + ev_home_import_price * ev_home_ch_kwh
+        + ext_charge_cost_eur
+        + ev_battery_degradation_cost_eur
+        - ev_discharge_grid_revenue_eur
+    )
+
+
 def summarize_metrics(inp: pd.DataFrame, sim: pd.DataFrame, cfg: EnergySystemConfig) -> dict:
     """Compute aggregate cost, energy flow, and SOC-violation KPIs for one simulation."""
     def _sum_col(df: pd.DataFrame, col: str) -> float:

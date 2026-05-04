@@ -7,6 +7,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import pandas as pd
 
 from home_energy_opt.config import EnergySystemConfig
+from home_energy_opt.metrics import home_grid_import_kwh, step_cost_eur
 
 _GUROBI_API: Optional[Dict[str, Any]] = None
 # Treat smaller clamp deltas as pure floating-point noise.
@@ -960,9 +961,9 @@ def run_mpc_loop(
     out["ev_battery_degradation_cost_eur"] = (
         float(cfg.ev_degradation_eur_per_kwh_charged) * (out["ev_home_ch_kwh"] + out["ev_ext_ch_kwh"])
     )
-    out["home_load_grid_import_kwh"] = out[["grid_import_kwh", "home_load_kwh"]].min(axis=1)
+    out["home_load_grid_import_kwh"] = home_grid_import_kwh(out["home_load_kwh"], out["ev_dis_to_home_kwh"])
     out["ev_home_charge_cost_eur"] = ev_home_import_price * out["ev_home_ch_kwh"]
-    out["home_load_cost_eur"] = home_grid_price * out["home_load_kwh"]
+    out["home_load_cost_eur"] = home_grid_price * out["home_load_grid_import_kwh"]
     out["home_grid_price_total_eur_per_kwh"] = home_grid_price
     out["ev_home_import_price_eur_per_kwh"] = ev_home_import_price
     out["ev_home_export_price_eur_per_kwh"] = df["ev_home_export_price_eur_per_kwh"]
@@ -975,12 +976,15 @@ def run_mpc_loop(
     out["ev_discharge_grid_revenue_eur"] = (
         out["ev_discharge_grid_revenue_home_eur"] + out["ev_discharge_grid_revenue_external_eur"]
     )
-    out["step_cost_eur"] = (
-        home_grid_price * out["home_load_kwh"]
-        + ev_home_import_price * out["ev_home_ch_kwh"]
-        - out["ev_discharge_grid_revenue_eur"]
-        + out["ext_charge_cost_eur"]
-        + out["ev_battery_degradation_cost_eur"]
+    out["step_cost_eur"] = step_cost_eur(
+        home_grid_price=home_grid_price,
+        home_load_kwh=out["home_load_kwh"],
+        ev_dis_to_home_kwh=out["ev_dis_to_home_kwh"],
+        ev_home_import_price=ev_home_import_price,
+        ev_home_ch_kwh=out["ev_home_ch_kwh"],
+        ext_charge_cost_eur=out["ext_charge_cost_eur"],
+        ev_battery_degradation_cost_eur=out["ev_battery_degradation_cost_eur"],
+        ev_discharge_grid_revenue_eur=out["ev_discharge_grid_revenue_eur"],
     )
     out["ev_reserve_kwh"] = df["ev_reserve_kwh"]
     out["ev_state"] = df["ev_state"]
