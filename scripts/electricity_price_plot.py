@@ -394,12 +394,12 @@ def plot_carpet(ax, time, values, title, colorbar_label, fig, cmap="viridis", cl
 
     return image
 
-def calculate_best_future_v2g_profit_margin(home_buy_price_total_eur_per_kwh, scenario_name):
+def calculate_best_future_v2g_profit_margin(
+    home_buy_price_total_eur_per_kwh,
+    home_export_price_total_eur_per_kwh,
+    scenario_name,
+):
     cfg = EnergySystemConfig()
-    extra_costs_electricity = cfg.import_price_adder_eur_per_kwh
-    mehrwertsteuer = cfg.import_price_adder_pct + 1.0
-    netzentgelt = cfg.export_price_adder_eur_per_kwh
-    stromsteuer = 0.0244
     if "0.5degcost" in scenario_name:
         ev_battery_deg = cfg.ev_degradation_eur_per_kwh_charged / 2
     elif "0deg" in scenario_name:
@@ -407,28 +407,18 @@ def calculate_best_future_v2g_profit_margin(home_buy_price_total_eur_per_kwh, sc
     else:
         ev_battery_deg = cfg.ev_degradation_eur_per_kwh_charged
     roundtrip_efficiency = cfg.ev_eta_ch * cfg.ev_eta_dis
-    threshold = extra_costs_electricity - netzentgelt - stromsteuer + ev_battery_deg
-
-    day_ahead_prices = [
-        (value - extra_costs_electricity) / mehrwertsteuer
-        for value in home_buy_price_total_eur_per_kwh
-    ]
 
     best_future_profit_margins = []
 
-    for current_index, current_day_ahead_price in enumerate(day_ahead_prices):
-        end_index = min(current_index + 96, len(day_ahead_prices) - 1)
-        future_prices = day_ahead_prices[current_index + 1:end_index + 1]
+    for current_index, current_buy_price in enumerate(home_buy_price_total_eur_per_kwh):
+        end_index = min(current_index + 96, len(home_export_price_total_eur_per_kwh) - 1)
+        future_prices = home_export_price_total_eur_per_kwh[current_index + 1:end_index + 1]
 
         if future_prices:
             highest_future_price = max(future_prices)
-            best_future_profit_margin = (
-                highest_future_price * roundtrip_efficiency
-                - current_day_ahead_price * mehrwertsteuer
-                - threshold
-            )
+            best_future_profit_margin = highest_future_price * roundtrip_efficiency - current_buy_price - ev_battery_deg
         else:
-            best_future_profit_margin = -threshold
+            best_future_profit_margin = -(current_buy_price + ev_battery_deg)
 
         best_future_profit_margins.append(best_future_profit_margin)
 
@@ -520,6 +510,7 @@ def plot_carpet_plots(output_folder_path):
         time = pd.to_datetime(data["local_time"])
         data["best_future_v2g_profit_margin"] = calculate_best_future_v2g_profit_margin(
             data["ev_home_import_price_eur_per_kwh"].tolist(),
+            data["ev_home_export_price_eur_per_kwh"].tolist(),
             scenario_path.name,
         )
 
