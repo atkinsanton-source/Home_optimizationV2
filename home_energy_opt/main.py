@@ -305,7 +305,7 @@ def main() -> None:
     static_wallbox_discount = max(0.0, float(cfg_mpc_static.wallbox_cost_discount_eur_per_kwh))
     data_mpc_static["import_price_eur_per_kwh"] = static_mpc_price
     data_mpc_static["home_grid_price_eur_per_kwh"] = static_mpc_price
-    data_mpc_static["ev_home_import_price_eur_per_kwh"] = max(0.0, static_mpc_price - static_wallbox_discount)
+    data_mpc_static["ev_home_import_price_eur_per_kwh"] = static_mpc_price - static_wallbox_discount
     data_mpc_static["ev_home_export_price_eur_per_kwh"] = 0.0
     data_mpc_static["ev_external_export_price_eur_per_kwh"] = 0.0
     data_mpc_static["ev_export_price_eur_per_kwh"] = 0.0

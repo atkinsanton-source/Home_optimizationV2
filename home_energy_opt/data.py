@@ -111,7 +111,7 @@ def preprocess(df: pd.DataFrame, cfg: EnergySystemConfig) -> pd.DataFrame:
     wallbox_discount = max(0.0, float(cfg.wallbox_cost_discount_eur_per_kwh))
     out["home_grid_price_eur_per_kwh"] = home_grid_price
     out["import_price_eur_per_kwh"] = home_grid_price
-    out["ev_home_import_price_eur_per_kwh"] = (home_grid_price - wallbox_discount).clip(lower=0.0)
+    out["ev_home_import_price_eur_per_kwh"] = home_grid_price - wallbox_discount
     out["ev_connected_home"] = (charging_point_effective == "home").astype(int)
     out["ev_drive_kwh"] = out["EV_consumption_kWh"].clip(lower=0.0)
 
