@@ -20,21 +20,48 @@ SCENARIO_DISPLAY_LABELS = [
     "Noncommuter with 0 Battery Deg. Costs",
 ]
 
-POSTER_SCENARIO_LABELS = [
-    "Vergleich ohne\nV2H/V2G",
-    "Intelligentes\nLaden",
-    "Intelligentes\nLaden\n+ V2H",
-    "Intelligentes\nLaden\n+ V2H + V2G",
-    "Intelligentes\nLaden\n+ V2H + V2G\n0 Degr.-Kosten",
-]
-
 POSTER_MODEL_DISPLAY_LABELS = {
     "baseline_static": "Sofortlade-\nModell mit\nstatischem Tarif",
     "baseline_dynamic": "Sofortlade-\nModell mit\ndynamischem Tarif",
-    "mpc_static": "MPC-Modell\nmit statischem\nTarif",
-    "mpc_dynamic_v1": "MPC-Modell\nmit dynamischem\nTarif",
-    "mpc": "MPC-Modell\nmit dynamischem\nTarif",
+    "mpc_static": "Prädiktiv optimiertes\nModell mit\nstatischem Tarif",
+    "mpc_dynamic_v1": "Prädiktiv optimiertes\nModell mit\ndynamischem Tarif",
+    "mpc": "Prädiktiv optimiertes\nModell mit\ndynamischem Tarif",
 }
+
+POSTER_SCENARIO_GROUP_LABELS = [
+    "Referenzmodelle\nmit Regelbasiertem\nVerhalten",
+    "Prädiktiv optimierte\nModelle ohne Saldierung\nder umgelegten Kosten",
+    "Prädiktiv optimiertes\nModell mit Saldierung\nder Netzentgelte und\nUmlagen nach MiSpEl",
+]
+
+POSTER_COSTS_REVENUES_ROW_LABELS = {
+    "baseline_static": "Sofortlade-\nModell mit\nstatischem Tarif",
+    "baseline_dynamic": "Sofortlade-\nModell mit\ndynamischem Tarif",
+    "mpc_dynamic_v1": "Smart Charging",
+    "mpc_v2h": "Smart Charging\n+ V2H",
+    "mpc_v3_no_mispel": "Smart Charging\n+ V2H + V2G",
+    "mpc_v3_mispel": "Smart Charging\n+ V2H + V2G",
+}
+
+POSTER_ENERGY_ROW_LABELS = POSTER_COSTS_REVENUES_ROW_LABELS
+
+
+def _scenario_fragment_mask(cost_and_revenue_data, fragments):
+    scenario_values = cost_and_revenue_data["scenario"].astype(str)
+    mask = pd.Series(False, index=cost_and_revenue_data.index)
+    for fragment in fragments:
+        mask |= scenario_values.str.contains(fragment, case=False, regex=False, na=False)
+    return mask
+
+
+def _build_poster_row(source_data, scenario_group_label, display_label, model_name, display_order):
+    row = source_data[source_data["model"] == model_name].head(1).copy()
+    if row.empty:
+        raise ValueError(f"Missing {model_name} row for poster plot in scenario data.")
+    row.loc[:, "scenario"] = scenario_group_label
+    row.loc[:, "display_label"] = display_label
+    row.loc[:, "display_order"] = display_order
+    return row
 
 
 
@@ -209,17 +236,22 @@ def plot_home_import_price_breakdown(ax, initial_data_path):
         ("§ 19 StromNEV Umlage", 1.86, "#8a97a6"),
         ("Offshore-Umlage", 1.12, "#9ecae1"),
         ("KWKG-Umlage", 0.53, "#2f667a"),
-        ("Messstellenbetrieb Umlage", 1.77, "#bfe3f0"),
     ]
     levy_components_eur = [(label, value / 100.0, color) for label, value, color in levy_components_ct]
     levy_total_eur_per_kwh = sum(value for _, value, _ in levy_components_eur)
-    netzentgelte_eur_per_kwh = next(value for label, value, _ in levy_components_eur if label == "Netzentgelte Berlin")
     ev_netzentgelte_factor = 0.4
+
+    reimbursement_components_ct = [
+        ("Netzentgelt Berlin 2026", 8.88 * ev_netzentgelte_factor, "#f4c20d"),
+        ("KWKG-Umlage 2026 Berlin", 0.53, "#2f667a"),
+        ("Offshore-Umlage 2026", 1.12, "#9ecae1"),
+        ("StromNEV-Umlage 2026", 1.86, "#8a97a6"),
+    ]
+    reimbursement_components_eur = [(label, value / 100.0, color) for label, value, color in reimbursement_components_ct]
+    reimbursement_base_eur_per_kwh = sum(value for _, value, _ in reimbursement_components_eur)
 
     gross_home_vat_base = day_ahead_price_eur_per_kwh + levy_total_eur_per_kwh
     gross_home_vat = gross_home_vat_base * cfg.import_price_adder_pct
-    gross_home_total = gross_home_vat_base + gross_home_vat
-
     ev_levy_components_eur = []
     for label, value, color in levy_components_eur:
         if label == "Netzentgelte Berlin":
@@ -227,7 +259,8 @@ def plot_home_import_price_breakdown(ax, initial_data_path):
         ev_levy_components_eur.append((label, value, color))
     ev_vat_base = day_ahead_price_eur_per_kwh + sum(value for _, value, _ in ev_levy_components_eur)
     ev_vat = ev_vat_base * cfg.import_price_adder_pct
-    ev_total = ev_vat_base + ev_vat
+
+    reimbursement_vat = reimbursement_base_eur_per_kwh * cfg.import_price_adder_pct
 
     bar_specs = [
         ("Haushaltsstrom", [
@@ -235,11 +268,11 @@ def plot_home_import_price_breakdown(ax, initial_data_path):
             *[(label, value, color, False) for label, value, color in levy_components_eur],
             ("Umsatzsteuer", gross_home_vat, "#cfe8f3", False),
         ]),
-        ("Strompreis für steuerbare Verbrauchseinrichtungen\nnach § 14a EnWG Modul 2\n(Wallbox)", [
+        ("Strompreis für die Wallbox\nnach § 14a EnWG Modul 2", [
             ("Energiebeschaffung", day_ahead_price_eur_per_kwh, "#1f4e79", False),
             *[
                 (
-                    label if label != "Netzentgelte Berlin" else "Netzentgelte Berlin (40%)",
+                    label,
                     value,
                     color,
                     False,
@@ -248,9 +281,16 @@ def plot_home_import_price_breakdown(ax, initial_data_path):
             ],
             ("Umsatzsteuer", ev_vat, "#cfe8f3", False),
         ]),
+        ("Erlös und Saldierung\nbei Einspeisung", [
+            ("Energiebeschaffung", day_ahead_price_eur_per_kwh, "#1f4e79", False),
+            *[(label, value, color, False) for label, value, color in reimbursement_components_eur],
+            ("Umsatzsteuer", reimbursement_vat, "#cfe8f3", False),
+        ]),
     ]
 
-    y_positions = list(range(len(bar_specs)))[::-1]
+    y_step = 0.22
+    y_positions = [(len(bar_specs) - 1 - index) * y_step for index in range(len(bar_specs))]
+    bar_height = 0.10
     for y, (label, components) in zip(y_positions, bar_specs):
         left = 0.0
         for _, value, color, use_hatch in components:
@@ -258,7 +298,7 @@ def plot_home_import_price_breakdown(ax, initial_data_path):
                 y,
                 value * 100.0,
                 left=left * 100.0,
-                height=0.24,
+                height=bar_height,
                 color=color,
                 edgecolor="black",
                 linewidth=0.5,
@@ -269,12 +309,14 @@ def plot_home_import_price_breakdown(ax, initial_data_path):
             left += value
 
     ax.set_yticks(y_positions)
-    ax.set_yticklabels([label for label, _ in bar_specs])
-    ax.set_xlabel("Preisbestandteile in ct/kWh")
+    ax.set_yticklabels([label for label, _ in bar_specs], fontsize=15)
+    ax.set_xlabel("Preisbestandteile in ct/kWh", fontsize=16, labelpad=7)
+    ax.set_title("Strompreiszusammensetzung und Saldierung bei Einspeisung", fontweight="bold", fontsize=20, pad=14)
     ax.grid(True, axis="x", alpha=0.3)
-    ax.set_xlim(0, max(45.0, gross_home_total * 100.0 + 4.0, ev_total * 100.0 + 4.0))
-    ax.set_ylim(-0.5, len(bar_specs) - 0.5)
-    ax.tick_params(axis="y", length=0)
+    ax.set_xlim(0, 35.0)
+    ax.set_ylim(-0.18, y_positions[0] + 0.18)
+    ax.tick_params(axis="y", length=0, labelsize=15)
+    ax.tick_params(axis="x", labelsize=14)
 
     ax.spines["top"].set_visible(False)
     ax.spines["right"].set_visible(False)
@@ -286,14 +328,13 @@ def plot_home_import_price_breakdown(ax, initial_data_path):
         Patch(facecolor="#1f4e79", edgecolor="white", label="Energiebeschaffung"),
         Patch(facecolor="#1f77b4", edgecolor="white", label="Konzessionsabgabe Berlin"),
         Patch(facecolor="#22a6f2", edgecolor="white", label="Stromsteuer"),
-        Patch(facecolor="#f4c20d", edgecolor="black", label="Netzentgelte Berlin (40%)"),
+        Patch(facecolor="#f4c20d", edgecolor="white", label="Netzentgelte Berlin"),
         Patch(facecolor="#8a97a6", edgecolor="white", label="§ 19 StromNEV Umlage"),
         Patch(facecolor="#9ecae1", edgecolor="white", label="Offshore-Umlage"),
         Patch(facecolor="#2f667a", edgecolor="white", label="KWKG-Umlage"),
-        Patch(facecolor="#bfe3f0", edgecolor="white", label="Messstellenbetrieb Umlage"),
         Patch(facecolor="#cfe8f3", edgecolor="white", label="Umsatzsteuer"),
     ]
-    ax.legend(handles=legend_handles, loc="upper center", bbox_to_anchor=(0.5, 1.30), ncol=3, frameon=False, fontsize=8, handlelength=0.9, handletextpad=0.3, columnspacing=0.8)
+    ax.legend(handles=legend_handles, loc="upper left", bbox_to_anchor=(1.02, 1.0), ncol=1, frameon=False, fontsize=12, handlelength=1.0, handletextpad=0.4, columnspacing=0.8)
 
     return
 
@@ -450,7 +491,25 @@ def plot_indifference_curve_v2g(ax,x):
 
     return 
 
-def plot_carpet(ax, time, values, title, colorbar_label, fig, cmap="viridis", clip_values=True, vmin=None, vmax=None, show_colorbar=True):
+def plot_carpet(
+    ax,
+    time,
+    values,
+    title,
+    colorbar_label,
+    fig,
+    cmap="viridis",
+    clip_values=True,
+    vmin=None,
+    vmax=None,
+    show_colorbar=True,
+    xtick_fontsize=7,
+    ytick_fontsize=7,
+    xlabel_fontsize=8,
+    ylabel_fontsize=8,
+    title_fontsize=None,
+    colorbar_fontsize=None,
+):
     data = pd.DataFrame({
         "time": time,
         "value": pd.to_numeric(values, errors="coerce"),
@@ -489,12 +548,17 @@ def plot_carpet(ax, time, values, title, colorbar_label, fig, cmap="viridis", cl
         hour_labels.append(f"{hour:02d}")
 
     ax.set_xticks(month_ticks)
-    ax.set_xticklabels(month_labels, fontsize=7)
+    ax.set_xticklabels(month_labels, fontsize=xtick_fontsize)
     ax.set_yticks(hour_ticks)
-    ax.set_yticklabels(hour_labels, fontsize=7)
-    ax.set_xlabel("Month", fontsize=8)
-    ax.set_ylabel("Time of day", fontsize=8)
-    ax.set_title(title)
+    ax.set_yticklabels(hour_labels, fontsize=ytick_fontsize)
+    ax.set_xlabel("Month", fontsize=xlabel_fontsize)
+    ax.set_ylabel("Time of day", fontsize=ylabel_fontsize)
+    if title_fontsize is None:
+        ax.set_title(title)
+    else:
+        ax.set_title(title, fontsize=title_fontsize)
+
+    ax.tick_params(axis="both", labelsize=max(xtick_fontsize, ytick_fontsize))
 
     return image
 
@@ -511,6 +575,18 @@ def build_v2g_profitability_inputs(initial_data_path):
         home_grid_price_eur_per_kwh - wallbox_discount
     )
     return day_ahead_price_eur_per_kwh.tolist(), home_buy_price_total_eur_per_kwh.tolist()
+
+
+def build_home_grid_price_inputs_from_initial_data(initial_data_path):
+    cfg = EnergySystemConfig()
+    initial_data = pd.read_csv(initial_data_path)
+
+    day_ahead_price_eur_per_kwh = pd.to_numeric(initial_data["day_ahead_price"], errors="coerce") / 1000.0
+    home_grid_price_eur_per_kwh = (
+        day_ahead_price_eur_per_kwh * (1.0 + cfg.import_price_adder_pct)
+        + cfg.import_price_adder_eur_per_kwh
+    )
+    return day_ahead_price_eur_per_kwh.tolist(), home_grid_price_eur_per_kwh.tolist()
 
 
 def calculate_v2g_profit_margin_from_initial_data(
@@ -718,6 +794,47 @@ def plot_carpet_plots(output_folder_path, initial_data_path):
     return
 
 
+def plot_home_grid_price_carpet_from_initial_data(initial_data_path):
+    initial_data = pd.read_csv(initial_data_path)
+    time = pd.to_datetime(initial_data["local_time"], utc=True).dt.tz_convert(None)
+    _, home_grid_price_eur_per_kwh = build_home_grid_price_inputs_from_initial_data(initial_data_path)
+
+    fig, ax = plt.subplots(figsize=(14.0, 5.2))
+    fig.subplots_adjust(left=0.08, right=0.86, top=0.90, bottom=0.16)
+
+    image = plot_carpet(
+        ax,
+        time,
+        home_grid_price_eur_per_kwh,
+        "Strompreis für Haushaltsstrom 2025",
+        "Preis in EUR/kWh",
+        fig,
+        cmap="viridis",
+        clip_values=True,
+        vmin=None,
+        vmax=None,
+        show_colorbar=True,
+        xtick_fontsize=11,
+        ytick_fontsize=11,
+        xlabel_fontsize=13,
+        ylabel_fontsize=13,
+        title_fontsize=16,
+    )
+
+    ax.set_xlabel("Monat", fontsize=13)
+    ax.set_ylabel("Uhrzeit", fontsize=13)
+    ax.set_title("Strompreis für Haushaltsstrom 2025", fontweight="bold", fontsize=16)
+    ax.tick_params(axis="both", labelsize=11)
+    if ax.images:
+        colorbar = ax.images[0].colorbar
+        if colorbar is not None:
+            colorbar.ax.tick_params(labelsize=11)
+            colorbar.set_label("Preis in EUR/kWh", fontsize=12)
+    plt.show()
+
+    return
+
+
 def plot_profitability_carpet_poster(initial_data_path):
     cfg = EnergySystemConfig()
     initial_data = pd.read_csv(initial_data_path)
@@ -827,10 +944,13 @@ def _plot_costs_and_revenues_ordered(
     cost_and_revenue_data = cost_and_revenue_data.copy().reset_index(drop=True)
     scenarios = list(dict.fromkeys(cost_and_revenue_data["scenario"].tolist()))
 
-    x_labels = [
-        model_display_labels.get(row.model, row.model)
-        for row in cost_and_revenue_data.itertuples()
-    ]
+    if "display_label" in cost_and_revenue_data.columns:
+        x_labels = cost_and_revenue_data["display_label"].tolist()
+    else:
+        x_labels = [
+            model_display_labels.get(row.model, row.model)
+            for row in cost_and_revenue_data.itertuples()
+        ]
 
     public_charge_costs = cost_and_revenue_data["external_charge_public_cost_eur"].tolist()
     workplace_charge_costs = cost_and_revenue_data["external_charge_workplace_cost_eur"].tolist()
@@ -888,7 +1008,7 @@ def _plot_costs_and_revenues_ordered(
             ax.text(x_value, total_cost + 7, f"{total_cost:.0f}", color="black", fontsize=total_value_fontsize, fontweight="bold", ha="center", va="bottom")
 
     for x_value, revenue in zip(revenue_x, ev_discharge_grid_revenues):
-        if revenue > 100:
+        if revenue > 0:
             ax.text(x_value, revenue + 5, f"{revenue:.0f}", color="black", fontsize=revenue_value_fontsize, fontweight="bold", ha="center", va="bottom")
 
     ax.bar_label(bars_home_load, labels=[f"{value:.0f}" if value > 100 else "" for value in home_load_costs], label_type="center", fontsize=bar_value_fontsize)
@@ -896,11 +1016,11 @@ def _plot_costs_and_revenues_ordered(
     ax.bar_label(bars_workplace_charge, labels=[f"{value:.0f}" if value > 100 else "" for value in workplace_charge_costs], label_type="center", fontsize=bar_value_fontsize)
     ax.bar_label(bars_fast_charge, labels=[f"{value:.0f}" if value > 100 else "" for value in fast_charge_costs], label_type="center", fontsize=bar_value_fontsize)
     ax.bar_label(bars_ev_battery_deg, labels=[f"{value:.0f}" if value > 100 else "" for value in ev_battery_degradation_costs], label_type="center", fontsize=bar_value_fontsize)
-    ax.bar_label(bars_revenue, labels=[f"{value:.0f}" if value > 100 else "" for value in ev_discharge_grid_revenues], label_type="center", fontsize=bar_value_fontsize)
+    ax.bar_label(bars_revenue, labels=[f"{value:.0f}" if value > 0 else "" for value in ev_discharge_grid_revenues], label_type="center", fontsize=bar_value_fontsize)
 
     ax.set_xticks([value + (width + bar_gap) / 2 for value in x])
     ax.set_xticklabels(x_labels, fontsize=xtick_fontsize, rotation=x_label_rotation, ha=x_label_ha, rotation_mode="anchor")
-    ax.set_ylabel(ylabel_text, fontweight="bold", fontsize=ylabel_fontsize, labelpad=-2)
+    ax.set_ylabel(ylabel_text, fontweight="normal", fontsize=max(ylabel_fontsize - 1, 1), labelpad=-2)
     ax.set_title(title, fontsize=title_fontsize, fontweight="bold", loc=title_loc)
     for scenario_index, scenario in enumerate(scenarios):
         scenario_rows = cost_and_revenue_data.index[cost_and_revenue_data["scenario"] == scenario].tolist()
@@ -912,7 +1032,8 @@ def _plot_costs_and_revenues_ordered(
             next_pair_left = x[scenario_start] - width / 2
             separator_x = (previous_pair_right + next_pair_left) / 2
             ax.axvline(separator_x, color="gray", linestyle="--", linewidth=1, alpha=0.5)
-        ax.text(scenario_center, -0.18, scenario_labels[scenario_index], ha="center", va="top", fontsize=scenario_label_fontsize, fontweight="bold", transform=ax.get_xaxis_transform())
+        scenario_label = scenario_labels[scenario_index] if scenario_index < len(scenario_labels) else scenario
+        ax.text(scenario_center, -0.18, scenario_label, ha="center", va="top", fontsize=scenario_label_fontsize, fontweight="bold", transform=ax.get_xaxis_transform())
         if show_scenario_name:
             ax.text(scenario_center, scenario_name_y, scenario, ha="center", va="top", fontsize=scenario_name_fontsize, transform=ax.get_xaxis_transform())
     
@@ -966,46 +1087,45 @@ def plot_costs_and_revenues(cost_and_revenue_data):
 
 def plot_costs_and_revenues_poster(cost_and_revenue_data):
     cost_and_revenue_data = cost_and_revenue_data.copy()
-    source_v2 = cost_and_revenue_data[
-        cost_and_revenue_data["scenario"] == "outputs_Tesla3_V2_79.5KWh_NonCommuter"
+    source_v2 = cost_and_revenue_data[_scenario_fragment_mask(cost_and_revenue_data, ["Tesla3_V2_79.5KWh_NonCommuter"])]
+    source_v3_no_mispel = cost_and_revenue_data[
+        _scenario_fragment_mask(
+            cost_and_revenue_data,
+            ["Tesla3_V3_79.5KWh_NonCommuter_0.3deg_noMispel", "Tesla3_V3_79.5KWh_NonCommuter_0deg"],
+        )
     ]
-    source_v3 = cost_and_revenue_data[
-        cost_and_revenue_data["scenario"] == "outputs_Tesla3_V3_79.5KWh_NonCommuter"
-    ]
-    source_v3_0deg = cost_and_revenue_data[
-        cost_and_revenue_data["scenario"] == "outputs_Tesla3_V3_79.5KWh_NonCommuter_0deg"
+    source_v3_mispel = cost_and_revenue_data[
+        _scenario_fragment_mask(
+            cost_and_revenue_data,
+            ["Tesla3_V3_79.5KWh_NonCommuter_0.3deg_Mispel"],
+        )
     ]
 
-    if source_v2.empty or source_v3.empty or source_v3_0deg.empty:
-        print("Missing V2, V3, or V3 0deg scenario data for the poster plot.")
+    if source_v2.empty or source_v3_no_mispel.empty or source_v3_mispel.empty:
+        print("Missing V2, V3 no Mispel, or V3 Mispel scenario data for the poster plot.")
         return
 
     poster_rows = []
     display_order = 0
 
-    def add_row(source_data, scenario_label, model_name):
-        nonlocal display_order
-        row = source_data[source_data["model"] == model_name].head(1).copy()
-        if row.empty:
-            raise ValueError(f"Missing {model_name} row for poster plot in scenario data.")
-        row.loc[:, "scenario"] = scenario_label
-        row.loc[:, "display_order"] = display_order
-        display_order += 1
-        poster_rows.append(row)
-
-    for model_name in ["baseline_static", "baseline_dynamic"]:
-        add_row(source_v2, POSTER_SCENARIO_LABELS[0], model_name)
-    add_row(source_v2, POSTER_SCENARIO_LABELS[1], "mpc_dynamic_v1")
-    add_row(source_v2, POSTER_SCENARIO_LABELS[2], "mpc")
-    add_row(source_v3, POSTER_SCENARIO_LABELS[3], "mpc")
-    add_row(source_v3_0deg, POSTER_SCENARIO_LABELS[4], "mpc")
+    poster_rows.append(_build_poster_row(source_v2, POSTER_SCENARIO_GROUP_LABELS[0], POSTER_COSTS_REVENUES_ROW_LABELS["baseline_static"], "baseline_static", display_order))
+    display_order += 1
+    poster_rows.append(_build_poster_row(source_v2, POSTER_SCENARIO_GROUP_LABELS[0], POSTER_COSTS_REVENUES_ROW_LABELS["baseline_dynamic"], "baseline_dynamic", display_order))
+    display_order += 1
+    poster_rows.append(_build_poster_row(source_v2, POSTER_SCENARIO_GROUP_LABELS[1], POSTER_COSTS_REVENUES_ROW_LABELS["mpc_dynamic_v1"], "mpc_dynamic_v1", display_order))
+    display_order += 1
+    poster_rows.append(_build_poster_row(source_v2, POSTER_SCENARIO_GROUP_LABELS[1], POSTER_COSTS_REVENUES_ROW_LABELS["mpc_v2h"], "mpc", display_order))
+    display_order += 1
+    poster_rows.append(_build_poster_row(source_v3_no_mispel, POSTER_SCENARIO_GROUP_LABELS[1], POSTER_COSTS_REVENUES_ROW_LABELS["mpc_v3_no_mispel"], "mpc", display_order))
+    display_order += 1
+    poster_rows.append(_build_poster_row(source_v3_mispel, POSTER_SCENARIO_GROUP_LABELS[2], POSTER_COSTS_REVENUES_ROW_LABELS["mpc_v3_mispel"], "mpc", display_order))
 
     poster_data = pd.concat(poster_rows, ignore_index=True)
     poster_data = poster_data.sort_values("display_order").reset_index(drop=True)
 
     _plot_costs_and_revenues_ordered(
         poster_data,
-        POSTER_SCENARIO_LABELS,
+        POSTER_SCENARIO_GROUP_LABELS,
         "Kosten und Erlöse",
         scenario_name_y=-0.24,
         model_display_labels=POSTER_MODEL_DISPLAY_LABELS,
@@ -1098,10 +1218,13 @@ def _plot_energy_sinks_sources_ordered(
     cost_and_revenue_data = cost_and_revenue_data.copy().reset_index(drop=True)
     scenarios = list(dict.fromkeys(cost_and_revenue_data["scenario"].tolist()))
 
-    x_labels = [
-        model_display_labels.get(row.model, row.model)
-        for row in cost_and_revenue_data.itertuples()
-    ]
+    if "display_label" in cost_and_revenue_data.columns:
+        x_labels = cost_and_revenue_data["display_label"].tolist()
+    else:
+        x_labels = [
+            model_display_labels.get(row.model, row.model)
+            for row in cost_and_revenue_data.itertuples()
+        ]
 
     ev_public_charge_kwh = cost_and_revenue_data["external_charge_public_kwh"].tolist()
     ev_workplace_charge_kwh = cost_and_revenue_data["external_charge_workplace_kwh"].tolist()
@@ -1209,7 +1332,8 @@ def _plot_energy_sinks_sources_ordered(
             next_pair_left = x[scenario_start] - width / 2
             separator_x = (previous_pair_right + next_pair_left) / 2
             ax.axvline(separator_x, color="gray", linestyle="--", linewidth=1, alpha=0.5)
-        ax.text(scenario_center, -0.11, scenario_labels[scenario_index], ha="center", va="top", fontsize=scenario_label_fontsize, fontweight="bold", transform=ax.get_xaxis_transform())
+        scenario_label = scenario_labels[scenario_index] if scenario_index < len(scenario_labels) else scenario
+        ax.text(scenario_center, -0.11, scenario_label, ha="center", va="top", fontsize=scenario_label_fontsize, fontweight="bold", transform=ax.get_xaxis_transform())
         if show_scenario_name:
             ax.text(scenario_center, -0.20, scenario, ha="center", va="top", fontsize=scenario_name_fontsize, transform=ax.get_xaxis_transform())
 
@@ -1283,46 +1407,45 @@ def plot_energy_sinks_sources(cost_and_revenue_data):
 
 def plot_energy_sinks_sources_poster(cost_and_revenue_data):
     cost_and_revenue_data = cost_and_revenue_data.copy()
-    source_v2 = cost_and_revenue_data[
-        cost_and_revenue_data["scenario"] == "outputs_Tesla3_V2_79.5KWh_NonCommuter"
+    source_v2 = cost_and_revenue_data[_scenario_fragment_mask(cost_and_revenue_data, ["Tesla3_V2_79.5KWh_NonCommuter"])]
+    source_v3_no_mispel = cost_and_revenue_data[
+        _scenario_fragment_mask(
+            cost_and_revenue_data,
+            ["Tesla3_V3_79.5KWh_NonCommuter_0.3deg_noMispel", "Tesla3_V3_79.5KWh_NonCommuter_0deg"],
+        )
     ]
-    source_v3 = cost_and_revenue_data[
-        cost_and_revenue_data["scenario"] == "outputs_Tesla3_V3_79.5KWh_NonCommuter"
-    ]
-    source_v3_0deg = cost_and_revenue_data[
-        cost_and_revenue_data["scenario"] == "outputs_Tesla3_V3_79.5KWh_NonCommuter_0deg"
+    source_v3_mispel = cost_and_revenue_data[
+        _scenario_fragment_mask(
+            cost_and_revenue_data,
+            ["Tesla3_V3_79.5KWh_NonCommuter_0.3deg_Mispel"],
+        )
     ]
 
-    if source_v2.empty or source_v3.empty or source_v3_0deg.empty:
-        print("Missing V2, V3, or V3 0deg scenario data for the energy poster plot.")
+    if source_v2.empty or source_v3_no_mispel.empty or source_v3_mispel.empty:
+        print("Missing V2, V3 no Mispel, or V3 Mispel scenario data for the energy poster plot.")
         return
 
     poster_rows = []
     display_order = 0
 
-    def add_row(source_data, scenario_label, model_name):
-        nonlocal display_order
-        row = source_data[source_data["model"] == model_name].head(1).copy()
-        if row.empty:
-            raise ValueError(f"Missing {model_name} row for energy poster plot in scenario data.")
-        row.loc[:, "scenario"] = scenario_label
-        row.loc[:, "display_order"] = display_order
-        display_order += 1
-        poster_rows.append(row)
-
-    for model_name in ["baseline_static", "baseline_dynamic"]:
-        add_row(source_v2, POSTER_SCENARIO_LABELS[0], model_name)
-    add_row(source_v2, POSTER_SCENARIO_LABELS[1], "mpc_dynamic_v1")
-    add_row(source_v2, POSTER_SCENARIO_LABELS[2], "mpc")
-    add_row(source_v3, POSTER_SCENARIO_LABELS[3], "mpc")
-    add_row(source_v3_0deg, POSTER_SCENARIO_LABELS[4], "mpc")
+    poster_rows.append(_build_poster_row(source_v2, POSTER_SCENARIO_GROUP_LABELS[0], POSTER_ENERGY_ROW_LABELS["baseline_static"], "baseline_static", display_order))
+    display_order += 1
+    poster_rows.append(_build_poster_row(source_v2, POSTER_SCENARIO_GROUP_LABELS[0], POSTER_ENERGY_ROW_LABELS["baseline_dynamic"], "baseline_dynamic", display_order))
+    display_order += 1
+    poster_rows.append(_build_poster_row(source_v2, POSTER_SCENARIO_GROUP_LABELS[1], POSTER_ENERGY_ROW_LABELS["mpc_dynamic_v1"], "mpc_dynamic_v1", display_order))
+    display_order += 1
+    poster_rows.append(_build_poster_row(source_v2, POSTER_SCENARIO_GROUP_LABELS[1], POSTER_ENERGY_ROW_LABELS["mpc_v2h"], "mpc", display_order))
+    display_order += 1
+    poster_rows.append(_build_poster_row(source_v3_no_mispel, POSTER_SCENARIO_GROUP_LABELS[1], POSTER_ENERGY_ROW_LABELS["mpc_v3_no_mispel"], "mpc", display_order))
+    display_order += 1
+    poster_rows.append(_build_poster_row(source_v3_mispel, POSTER_SCENARIO_GROUP_LABELS[2], POSTER_ENERGY_ROW_LABELS["mpc_v3_mispel"], "mpc", display_order))
 
     poster_data = pd.concat(poster_rows, ignore_index=True)
     poster_data = poster_data.sort_values("display_order").reset_index(drop=True)
 
     _plot_energy_sinks_sources_ordered(
         poster_data,
-        POSTER_SCENARIO_LABELS,
+        POSTER_SCENARIO_GROUP_LABELS,
         "Energiequellen und -senken",
         show_scenario_name=False,
         model_display_labels=POSTER_MODEL_DISPLAY_LABELS,
@@ -1390,13 +1513,14 @@ def main():
     print("6: Energy Sources and Sinks Poster")
     print("7: Profitability Carpet Poster")
     print("8: Price component breakdown")
-    choice = input("Enter 1, 2, 3, 4, 5, 6, 7 or 8: ")
+    print("9: Home grid price carpet from initial data")
+    choice = input("Enter 1, 2, 3, 4, 5, 6, 7, 8 or 9: ")
 
-    #For the Electricity Price Data
-    results_data_path=("/Users/anton.atkins/Documents/TU Berlin/Bachelor Arbeit/code/New_ModelV2/Home_optimizationV2/Outputs_Systemintegration_kosten/outputs_Tesla3_V3_79.5KWh_NonCommuter/mpc_results.csv")
-    initial_data_path=("/Users/anton.atkins/Documents/TU Berlin/Bachelor Arbeit/code/New_ModelV2/Home_optimizationV2/data/LPG_FlexEhome_2025_Tesla3_79.5_Commuter.csv")
     output_folder_path = "/Users/anton.atkins/Documents/TU Berlin/Bachelor Arbeit/code/New_ModelV2/Home_optimizationV2/Outputs_Systemintegration_kosten"
     poster_output_folder_path = "/Users/anton.atkins/Documents/TU Berlin/Bachelor Arbeit/code/New_ModelV2/Home_optimizationV2/Outputs_Systemintegration_kosten"
+    # For the electricity price plots, use one of the renamed outputs folders by default.
+    results_data_path = "/Users/anton.atkins/Documents/TU Berlin/Bachelor Arbeit/code/New_ModelV2/Home_optimizationV2/Outputs_Systemintegration_kosten/outputs_2_Tesla3_V3_79.5KWh_NonCommuter_0.3deg_noMispel/mpc_results.csv"
+    initial_data_path = "/Users/anton.atkins/Documents/TU Berlin/Bachelor Arbeit/code/New_ModelV2/Home_optimizationV2/data/LPG_FlexEhome_2025_Tesla3_79.5_Commuter.csv"
 
     if choice == "1":
         data = ElectricityPriceData.from_csv(results_data_path, initial_data_path)
@@ -1443,13 +1567,16 @@ def main():
         plot_profitability_carpet_poster(initial_data_path)
 
     elif choice == "8":
-        fig, ax = plt.subplots(figsize=(11.5, 4.8))
+        fig, ax = plt.subplots(figsize=(13.5, 4.1))
         plot_home_import_price_breakdown(ax, initial_data_path)
-        plt.tight_layout(rect=(0, 0, 1, 0.92))
+        plt.tight_layout(rect=(0, 0.03, 0.76, 0.95))
         plt.show()
 
+    elif choice == "9":
+        plot_home_grid_price_carpet_from_initial_data(initial_data_path)
+
     else:
-        print("Invalid choice. Please enter 1, 2, 3, 4, 5, 6, 7 or 8.")
+        print("Invalid choice. Please enter 1, 2, 3, 4, 5, 6, 7, 8 or 9.")
 
 
     return
