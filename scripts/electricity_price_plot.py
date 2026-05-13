@@ -30,8 +30,8 @@ POSTER_MODEL_DISPLAY_LABELS = {
 
 POSTER_SCENARIO_GROUP_LABELS = [
     "Referenzmodelle\nmit Regelbasiertem\nVerhalten",
-    "Prädiktiv optimierte\nModelle ohne Saldierung\nder umgelegten Kosten",
-    "Prädiktiv optimiertes\nModell mit Saldierung\nder Netzentgelte und\nUmlagen nach MiSpEl",
+    "Prädiktiv optimierte\nModelle ohne Saldierung\nder Netzentgelte und Umlagen",
+    "Prädiktiv optimiertes\nModell mit Saldierung\nder Netzentgelte und\nUmlagen",
 ]
 
 POSTER_COSTS_REVENUES_ROW_LABELS = {
@@ -288,6 +288,11 @@ def plot_home_import_price_breakdown(ax, initial_data_path):
         ]),
     ]
 
+    max_bar_length_ct = max(
+        sum(value for _, value, _, _ in components) * 100.0
+        for _, components in bar_specs
+    )
+
     y_step = 0.22
     y_positions = [(len(bar_specs) - 1 - index) * y_step for index in range(len(bar_specs))]
     bar_height = 0.10
@@ -310,13 +315,13 @@ def plot_home_import_price_breakdown(ax, initial_data_path):
 
     ax.set_yticks(y_positions)
     ax.set_yticklabels([label for label, _ in bar_specs], fontsize=15)
-    ax.set_xlabel("Preisbestandteile in ct/kWh", fontsize=16, labelpad=7)
+    ax.set_xlabel("Preisbestandteile in ct/kWh", fontsize=17, labelpad=7)
     ax.set_title("Strompreiszusammensetzung und Saldierung bei Einspeisung", fontweight="bold", fontsize=20, pad=14)
     ax.grid(True, axis="x", alpha=0.3)
-    ax.set_xlim(0, 35.0)
+    ax.set_xlim(0, max_bar_length_ct * 1.08)
     ax.set_ylim(-0.18, y_positions[0] + 0.18)
     ax.tick_params(axis="y", length=0, labelsize=15)
-    ax.tick_params(axis="x", labelsize=14)
+    ax.tick_params(axis="x", labelsize=15)
 
     ax.spines["top"].set_visible(False)
     ax.spines["right"].set_visible(False)
@@ -334,7 +339,7 @@ def plot_home_import_price_breakdown(ax, initial_data_path):
         Patch(facecolor="#2f667a", edgecolor="white", label="KWKG-Umlage"),
         Patch(facecolor="#cfe8f3", edgecolor="white", label="Umsatzsteuer"),
     ]
-    ax.legend(handles=legend_handles, loc="upper left", bbox_to_anchor=(1.02, 1.0), ncol=1, frameon=False, fontsize=12, handlelength=1.0, handletextpad=0.4, columnspacing=0.8)
+    ax.legend(handles=legend_handles, loc="upper left", bbox_to_anchor=(1.02, 1.0), ncol=1, frameon=False, fontsize=15, handlelength=1.0, handletextpad=0.4, columnspacing=0.8)
 
     return
 
@@ -800,13 +805,13 @@ def plot_home_grid_price_carpet_from_initial_data(initial_data_path):
     _, home_grid_price_eur_per_kwh = build_home_grid_price_inputs_from_initial_data(initial_data_path)
 
     fig, ax = plt.subplots(figsize=(14.0, 5.2))
-    fig.subplots_adjust(left=0.08, right=0.86, top=0.90, bottom=0.16)
+    fig.subplots_adjust(left=0.13, right=0.93, top=0.90, bottom=0.16)
 
     image = plot_carpet(
         ax,
         time,
         home_grid_price_eur_per_kwh,
-        "Strompreis für Haushaltsstrom 2025",
+        "Strompreise 2025: Volatil und Preissignale für Speicher",
         "Preis in EUR/kWh",
         fig,
         cmap="viridis",
@@ -814,22 +819,23 @@ def plot_home_grid_price_carpet_from_initial_data(initial_data_path):
         vmin=None,
         vmax=None,
         show_colorbar=True,
-        xtick_fontsize=11,
-        ytick_fontsize=11,
-        xlabel_fontsize=13,
-        ylabel_fontsize=13,
-        title_fontsize=16,
+        xtick_fontsize=15,
+        ytick_fontsize=15,
+        xlabel_fontsize=17,
+        ylabel_fontsize=17,
+        title_fontsize=20,
     )
+    ax.set_anchor("C")
 
-    ax.set_xlabel("Monat", fontsize=13)
-    ax.set_ylabel("Uhrzeit", fontsize=13)
-    ax.set_title("Strompreis für Haushaltsstrom 2025", fontweight="bold", fontsize=16)
-    ax.tick_params(axis="both", labelsize=11)
+    ax.set_xlabel("Monat", fontsize=17)
+    ax.set_ylabel("Uhrzeit", fontsize=17)
+    ax.set_title("Strompreise 2025: Volatil und Preissignale für Speicher", fontweight="bold", fontsize=20)
+    ax.tick_params(axis="both", labelsize=15)
     if ax.images:
         colorbar = ax.images[0].colorbar
         if colorbar is not None:
-            colorbar.ax.tick_params(labelsize=11)
-            colorbar.set_label("Preis in EUR/kWh", fontsize=12)
+            colorbar.ax.tick_params(labelsize=15)
+            colorbar.set_label("Preis in EUR/kWh", fontsize=16)
     plt.show()
 
     return
@@ -928,6 +934,7 @@ def _plot_costs_and_revenues_ordered(
     bar_value_fontsize=9,
     total_value_fontsize=9,
     revenue_value_fontsize=9,
+    legend_fontsize=8,
 ):
     models = ["baseline_static", "baseline_dynamic", "mpc_static", "mpc_dynamic_v1", "mpc"]
     if model_display_labels is None:
@@ -1001,7 +1008,7 @@ def _plot_costs_and_revenues_ordered(
         else:
             ax.hlines(net_value, x_value - width / 2, x_value + width / 2, colors="#d62728", linewidth=2)
         if net_value > 100:
-            ax.text(x_value - width / 2 - 0.08, net_value, f"{net_value:.0f}", color="#d62728", fontsize=net_label_fontsize, fontweight="bold", ha="right", va="center", bbox={"facecolor": "white", "edgecolor": "#d62728", "boxstyle": "square,pad=0.10"})
+            ax.text(x_value + width / 2 + 0.08, net_value, f"{net_value:.0f}", color="#d62728", fontsize=net_label_fontsize, fontweight="bold", ha="left", va="center", bbox={"facecolor": "white", "edgecolor": "#d62728", "boxstyle": "square,pad=0.10"})
 
     for x_value, total_cost in zip(x, total_costs):
         if total_cost > 100:
@@ -1031,7 +1038,7 @@ def _plot_costs_and_revenues_ordered(
             previous_pair_right = revenue_x[scenario_start - 1] + width / 2
             next_pair_left = x[scenario_start] - width / 2
             separator_x = (previous_pair_right + next_pair_left) / 2
-            ax.axvline(separator_x, color="gray", linestyle="--", linewidth=1, alpha=0.5)
+            ax.axvline(separator_x, color="black", linestyle="-", linewidth=1.4, alpha=1.0)
         scenario_label = scenario_labels[scenario_index] if scenario_index < len(scenario_labels) else scenario
         ax.text(scenario_center, -0.18, scenario_label, ha="center", va="top", fontsize=scenario_label_fontsize, fontweight="bold", transform=ax.get_xaxis_transform())
         if show_scenario_name:
@@ -1054,12 +1061,12 @@ def _plot_costs_and_revenues_ordered(
                     continue
                 ordered_handles.append(handle)
                 ordered_labels.append(label)
-        legend = ax.legend(ordered_handles, ordered_labels, loc="upper left", bbox_to_anchor=(1.02, 1))
+        legend = ax.legend(ordered_handles, ordered_labels, loc="upper left", bbox_to_anchor=(1.02, 1), fontsize=legend_fontsize)
         for text in legend.get_texts():
             if text.get_text() in {section_title for section_title, _ in legend_sections}:
                 text.set_fontweight("bold")
     else:
-        ax.legend(loc="upper left", bbox_to_anchor=(1.02, 1))
+        ax.legend(loc="upper left", bbox_to_anchor=(1.02, 1), fontsize=legend_fontsize)
     ax.set_axisbelow(True)
     ax.grid(True, axis="y", color="lightgray", linestyle="--", linewidth=1, alpha=0.8)
 
@@ -1126,7 +1133,7 @@ def plot_costs_and_revenues_poster(cost_and_revenue_data):
     _plot_costs_and_revenues_ordered(
         poster_data,
         POSTER_SCENARIO_GROUP_LABELS,
-        "Kosten und Erlöse",
+        "Kosten und Erlöse des Haushaltsstroms und E-Auto-Ladens",
         scenario_name_y=-0.24,
         model_display_labels=POSTER_MODEL_DISPLAY_LABELS,
         legend_label_map={
@@ -1155,6 +1162,7 @@ def plot_costs_and_revenues_poster(cost_and_revenue_data):
         bar_value_fontsize=13,
         total_value_fontsize=13,
         revenue_value_fontsize=13,
+        legend_fontsize=15,
         show_scenario_name=False,
     )
 
@@ -1460,7 +1468,7 @@ def plot_energy_sinks_sources_poster(cost_and_revenue_data):
         title_loc="center",
         bar_value_fontsize=13,
         total_value_fontsize=13,
-        legend_fontsize=11,
+        legend_fontsize=13,
         show_workplace_charge_label=False,
         workplace_charge_label="_nolegend_",
         legend_title=None,
@@ -1568,25 +1576,4 @@ def main():
 
     elif choice == "8":
         fig, ax = plt.subplots(figsize=(13.5, 4.1))
-        plot_home_import_price_breakdown(ax, initial_data_path)
-        plt.tight_layout(rect=(0, 0.03, 0.76, 0.95))
-        plt.show()
-
-    elif choice == "9":
-        plot_home_grid_price_carpet_from_initial_data(initial_data_path)
-
-    else:
-        print("Invalid choice. Please enter 1, 2, 3, 4, 5, 6, 7, 8 or 9.")
-
-
-    return
-
-if __name__ =="__main__":
-    main()
-
-
-    
-
-
-
-        
+        plot_home_import_price_br
