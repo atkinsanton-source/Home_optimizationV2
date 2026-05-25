@@ -4,7 +4,7 @@ Modular Python project for year-long 15-minute home energy simulation with three
 
 1. **Baseline rule-based control (dynamic home import price)**
 2. **Baseline rule-based control (static home import price)**
-3. **MPC optimization (native gurobipy rolling-horizon model)**
+3. **MPC optimization (SciPy/HiGHS rolling-horizon MILP)**
 
 ## Structure
 
@@ -57,6 +57,8 @@ Outputs:
 - `metrics_comparison.csv`
 - `system_connection_comparison_interactive.html` (interactive zoom/pan with dynamic axes after reopening; includes Overview + Flow Balance sections with `sources < 0`, `sinks > 0`)
 - `plotly.min.js` (local Plotly runtime copied next to the HTML for offline interaction)
+
+The MPC backend uses SciPy's `milp` interface, which is powered by HiGHS.
 
 ## Baseline Static Price Knob
 

@@ -90,10 +90,27 @@ class ElectricityPriceData:
         data_results = pd.read_csv(results_data_path)
         data_initial = pd.read_csv(initial_data_path)
 
+        def first_available_column(frame, *candidate_columns):
+            for column_name in candidate_columns:
+                if column_name in frame.columns:
+                    return frame[column_name]
+            raise KeyError(
+                f"None of the expected columns were found: {', '.join(candidate_columns)}"
+            )
 
         time = pd.to_datetime(data_results["local_time"])
-        electricity_prices = data_results.get("home_grid_price_total_eur_per_kwh", data_results["import_price_eur_per_kwh"])
-        home_buy_prices = data_results.get("ev_home_import_price_eur_per_kwh", electricity_prices)
+        electricity_prices = first_available_column(
+            data_results,
+            "home_grid_price_total_eur_per_kwh",
+            "ev_home_import_price_eur_per_kwh",
+            "import_price_eur_per_kwh",
+        )
+        home_buy_prices = first_available_column(
+            data_results,
+            "ev_home_import_price_eur_per_kwh",
+            "home_grid_price_total_eur_per_kwh",
+            "import_price_eur_per_kwh",
+        )
         day_ahead_price = data_initial["day_ahead_price"] / 1000.0
         ev_at_home_mask = data_results["ev_state"] == "home"
         discharging_mask = data_results["grid_export_kwh"] > 0
@@ -148,22 +165,23 @@ class ElectricityPriceData:
 
 
 
-def plot_electricity_price(ax, time, electricity_price):
+def plot_electricity_price(ax, time, electricity_price, title="Dynamischer Strompreis in Deutschland 2025 mit Octopus-Energy-Stromtarif"):
     avg_price=electricity_price.mean()
     rolling_avg_price_24h=electricity_price.rolling(window=96).mean()
 
-    ax.plot(time, electricity_price, label="EPEX 15 Minute Electricity Price", color="blue")
-    ax.axhline(avg_price, color="red", linestyle="--", label=f"Average = {avg_price:.2f}")
-    ax.plot(time, rolling_avg_price_24h, label="Rolling average", color="green", linewidth=2)
-    ax.set_xlabel("Time")
-    ax.set_ylabel("Price Euro/KWh")
-    ax.set_title("Dynamic Electricity Price Germany 2025 with a Octopus Energy Contract")
+    ax.plot(time, electricity_price, label="Strompreis im 15-Minuten-Takt", color="blue")
+    ax.axhline(avg_price, color="red", linestyle="--", label=f"Durchschnitt = {avg_price:.2f}")
+    ax.plot(time, rolling_avg_price_24h, label="24-Stündiger Gleitender Durchschnitt", color="green", linewidth=2)
+    ax.set_xlabel("Zeit")
+    ax.set_ylabel("Preis [EUR/kWh]")
+    if title:
+        ax.set_title(title)
     ax.legend()
     ax.grid(True)
 
     return
 
-def plot_priced_hours(ax, electricity_price, title):
+def plot_priced_hours(ax, electricity_price, title=None):
     cfg=EnergySystemConfig()
     static_electricity_price_eur_per_kwh=cfg.baseline_static_import_price_eur_per_kwh
     sorted_electricity_prices=sorted(electricity_price)
@@ -175,14 +193,15 @@ def plot_priced_hours(ax, electricity_price, title):
             intersection=hours[index]
             break
 
-    ax.plot(hours, sorted_electricity_prices, label="Sorted Dynamic Electricity Price", color="blue")
-    ax.axhline(static_electricity_price_eur_per_kwh, label=f"Static Electricity Price at {static_electricity_price_eur_per_kwh:.2f}Euro/KWh", color="green")
+    ax.plot(hours, sorted_electricity_prices, label="Aufsteigend sortierter Strompreis", color="blue")
+    ax.axhline(static_electricity_price_eur_per_kwh, label=f"Statischer Strompreis bei {static_electricity_price_eur_per_kwh:.2f} EUR/kWh", color="green")
     if intersection is not None:
-        ax.axvline(intersection, linestyle="--", color="black", label=f"Intersection at {intersection:.2f} h")
+        ax.axvline(intersection, linestyle="--", color="black", label=f"Schnittpunkt bei {intersection:.2f} h")
     ax.legend()
-    ax.set_xlabel("Hours")
-    ax.set_ylabel("Price Euro/KWh")
-    ax.set_title(title)
+    ax.set_xlabel("Stunden")
+    ax.set_ylabel("Preis [EUR/kWh]")
+    if title:
+        ax.set_title(title)
     ax.grid(True)
 
     return
@@ -211,20 +230,20 @@ def plot_weighted_grid_import_price(ax, grid_import_kwh, electricity_prices):
             intersection = row.cumulative_grid_import_kwh
             break
 
-    ax.plot(data["cumulative_grid_import_kwh"], data["electricity_price"], color="blue", label="Sorted bought electricity")
-    ax.axhline(weighted_average_price, color="red", linestyle="--", label=f"Weighted average = {weighted_average_price:.2f}")
-    ax.axhline(static_electricity_price_eur_per_kwh, color="green", label=f"Static Electricity Price at {static_electricity_price_eur_per_kwh:.2f}Euro/KWh")
+    ax.plot(data["cumulative_grid_import_kwh"], data["electricity_price"], color="blue", label="Sortierter Netzbezug")
+    ax.axhline(weighted_average_price, color="red", linestyle="--", label=f"Gewichteter Durchschnitt = {weighted_average_price:.2f}")
+    ax.axhline(static_electricity_price_eur_per_kwh, color="green", label=f"Statischer Strompreis bei {static_electricity_price_eur_per_kwh:.2f} EUR/kWh")
     if intersection is not None:
-        ax.axvline(intersection, linestyle="--", color="black", label=f"Intersection at {intersection:.2f} KWh")
-    ax.set_xlabel("Cumulative grid import [KWh]")
-    ax.set_ylabel("Price Euro/KWh")
-    ax.set_title("Weighted Average Price of Imported Grid Electricity in 2025")
+        ax.axvline(intersection, linestyle="--", color="black", label=f"Schnittpunkt bei {intersection:.2f} kWh")
+    ax.set_xlabel("Kumulierte Netzbezugsenergie [kWh]")
+    ax.set_ylabel("Preis [EUR/kWh]")
+    ax.set_title("Gewichteter Durchschnittspreis des aus dem Netz bezogenen Stroms 2025")
     ax.legend()
     ax.grid(True)
 
     return
 
-def plot_home_import_price_breakdown(ax, initial_data_path):
+def plot_home_import_price_breakdown(ax, initial_data_path, show_title=True):
     cfg = EnergySystemConfig()
     initial_data = pd.read_csv(initial_data_path)
 
@@ -316,7 +335,8 @@ def plot_home_import_price_breakdown(ax, initial_data_path):
     ax.set_yticks(y_positions)
     ax.set_yticklabels([label for label, _ in bar_specs], fontsize=15)
     ax.set_xlabel("Preisbestandteile in ct/kWh", fontsize=17, labelpad=7)
-    ax.set_title("Strompreiszusammensetzung und Saldierung bei Einspeisung", fontweight="bold", fontsize=20, pad=14)
+    if show_title:
+        ax.set_title("Strompreiszusammensetzung und Saldierung bei Einspeisung", fontweight="bold", fontsize=20, pad=14)
     ax.grid(True, axis="x", alpha=0.3)
     ax.set_xlim(0, max_bar_length_ct * 1.08)
     ax.set_ylim(-0.18, y_positions[0] + 0.18)
@@ -340,59 +360,6 @@ def plot_home_import_price_breakdown(ax, initial_data_path):
         Patch(facecolor="#cfe8f3", edgecolor="white", label="Umsatzsteuer"),
     ]
     ax.legend(handles=legend_handles, loc="upper left", bbox_to_anchor=(1.02, 1.0), ncol=1, frameon=False, fontsize=15, handlelength=1.0, handletextpad=0.4, columnspacing=0.8)
-
-    return
-
-def plot_sorted_buy_prices_with_best_future_sell_price(ax, home_buy_price_total_eur_per_kwh):
-    cfg = EnergySystemConfig()
-    ev_battery_deg=cfg.ev_degradation_eur_per_kwh_charged
-    extra_costs_electricity=cfg.import_price_adder_eur_per_kwh
-    netzentgelt=cfg.export_price_adder_eur_per_kwh
-    stromsteuer = 0.0244
-    Mehrwehrtsteuer=cfg.import_price_adder_pct + 1.0
-    roundtrip_efficiency = cfg.ev_eta_ch*cfg.ev_eta_dis
-    threshold = extra_costs_electricity-netzentgelt-stromsteuer+ev_battery_deg
-
-    home_buy_prices = list(home_buy_price_total_eur_per_kwh)
-    day_ahead_prices = [
-        (value - extra_costs_electricity) / Mehrwehrtsteuer
-        for value in home_buy_prices
-    ]
-    best_future_sell_prices = []
-
-    for current_index, current_day_ahead_price in enumerate(day_ahead_prices):
-        best_future_sell_price = None
-        end_index = min(current_index + 96, len(day_ahead_prices) - 1)
-        future_prices = day_ahead_prices[current_index + 1:end_index + 1]
-
-        if future_prices:
-            highest_future_price = max(future_prices)
-
-            if highest_future_price*roundtrip_efficiency - current_day_ahead_price * Mehrwehrtsteuer > threshold:
-                best_future_sell_price = highest_future_price
-
-        best_future_sell_prices.append(best_future_sell_price)
-
-    data = pd.DataFrame({
-        "buy_price": home_buy_prices,
-        "best_future_sell_price": best_future_sell_prices,
-    })
-
-    data = data.sort_values("buy_price")
-    data["hours"] = [x * 0.25 for x in range(1, len(data) + 1)]
-    profitable_hours = data["best_future_sell_price"].notna().sum() * 0.25
-
-    ax.plot(data["hours"], data["buy_price"], color="blue", label="Sorted buy price")
-    profitable_data = data[data["best_future_sell_price"].notna()]
-    ax.scatter(profitable_data["hours"], profitable_data["best_future_sell_price"], color="green", s=8, label="Best profitable sell price within 24h")
-    ax.set_xlabel("Hours")
-    ax.set_ylabel("Price Euro/KWh")
-    ax.set_title(
-        f"Sorted Buy Prices and Best Future Sell Prices\n"
-        f"Profitable Buy Windows: {profitable_hours:.1f} h"
-    )
-    ax.legend()
-    ax.grid(True)
 
     return
 
@@ -430,7 +397,7 @@ def plot_price_deltas_with_profit_in24h(ax, time, day_ahead_price, buy_price_tot
 
         profitable_sell_mask.append(profitable)
 
-    ax.plot(time, current_buy_prices, label="EV Home Charge Price", color="blue")
+    ax.plot(time, current_buy_prices, label="Heimladetarif für das E-Fahrzeug", color="blue")
 
     window_start = None
     for index, profitable in enumerate(profitable_sell_mask):
@@ -455,46 +422,99 @@ def plot_price_deltas_with_profit_in24h(ax, time, day_ahead_price, buy_price_tot
         if window_start is not None:
             ax.axvspan(time.iloc[window_start], time.iloc[len(time) - 1], color="#ff9999", alpha=0.35)
 
-    ax.set_xlabel("Time")
-    ax.set_ylabel("Price Euro/KWh")
+    ax.set_xlabel("Zeit")
+    ax.set_ylabel("Preis [EUR/kWh]")
     if at_home_only:
         ax.set_title(
-            f"Sell Windows, in which V2G would be profitable, when EV is at home,\n"
-            f"Profitable Sell Windows: {sum(profitable_sell_mask)*0.25} h, "
-            f"Actual discharge: {sum(discharging_mask)*0.25} h"
+            f"Verkaufsfenster, in denen V2G profitabel wäre, wenn das E-Fahrzeug zu Hause ist,\n"
+            f"Profitierbare Verkaufsfenster: {sum(profitable_sell_mask)*0.25} h, "
+            f"Tatsächliche Entladung: {sum(discharging_mask)*0.25} h"
         )
     else:
         ax.set_title(
-            f"Sell windows, in which V2G would be profitable \n"
-            f"Profitable Sell Windows: {sum(profitable_sell_mask)*0.25} h,"
+            f"Verkaufsfenster, in denen V2G profitabel wäre\n"
+            f"Profitierbare Verkaufsfenster: {sum(profitable_sell_mask)*0.25} h,"
         )
     ax.legend()
     ax.grid(True)
 
     return
 
-def plot_indifference_curve_v2g(ax,x):
+def plot_indifference_curve_v2g(ax, x, show_title=True):
     cfg = EnergySystemConfig()
-    Netzentgelt=0.0997
-    Mehrwehrtsteuer=cfg.import_price_adder_pct
-    stromsteuer = 0.0244
-    ev_battery_deg=cfg.ev_degradation_eur_per_kwh_charged
-    extra_costs_electricity=cfg.import_price_adder_eur_per_kwh
+    VAT = cfg.import_price_adder_pct
+    ev_battery_deg = 0.067 * 0.3
+    import_adders=cfg.import_price_adder_eur_per_kwh
+    export_adders = 0.0888 + 0.00530 + 0.01120 + 0.01860
     roundtrip_efficiency = cfg.ev_eta_ch*cfg.ev_eta_dis
 
 
-    y = [(value * (1.0 + Mehrwehrtsteuer) + extra_costs_electricity + ev_battery_deg - Netzentgelt - stromsteuer)/roundtrip_efficiency for value in x]
-    ax.plot(x, y, label="Indifference Curve for V2G")
-    ax.set_xlabel("Buy Day Ahead Price [Eur/KWh]")
-    ax.set_ylabel("Sale Day Ahead Price [Eur/KWh]")
+    y = [(value * (1.0 + VAT) + import_adders + ev_battery_deg)/roundtrip_efficiency - export_adders for value in x]
+    ax.plot(x, y, label="Indifferenzkurve V2G")
+    ax.set_xlabel("Kaufpreis am Day-Ahead-Markt [EUR/kWh]")
+    ax.set_ylabel("Verkaufspreis am Day-Ahead-Markt [EUR/kWh]")
 
-    ax.set_title("Indifference Curve for V2G")
+    if show_title:
+        ax.set_title("Indifferenzkurve für V2G")
+    ax.set_xlim(0.0, 0.4)
     ax.legend()
     ax.minorticks_on()
     ax.grid(True, which="major", linewidth=0.8)
     ax.grid(True, which="minor", linewidth=0.4, alpha=0.3)
 
     return 
+
+def plot_indifference_curve_v2h(ax, x, show_title=True):
+    cfg = EnergySystemConfig()
+    vat = cfg.import_price_adder_pct
+    import_adders = cfg.import_price_adder_eur_per_kwh
+    ev_battery_deg = 0.067 * 0.3
+    roundtrip_efficiency = cfg.ev_eta_ch * cfg.ev_eta_dis
+
+    y = [
+        (
+            (
+                value * (1.0 + vat)
+                + import_adders
+                + ev_battery_deg
+            )
+            / roundtrip_efficiency
+            - import_adders
+        )
+        / (1.0 + vat)
+        for value in x
+    ]
+    ax.plot(x, y, label="Indifferenzkurve V2H")
+    ax.set_xlabel("Kaufpreis am Day-Ahead-Markt [EUR/kWh]")
+    ax.set_ylabel("Vermeideter Netzbezugspreis\nam Day-Ahead-Markt [EUR/kWh]")
+    if show_title:
+        ax.set_title("Indifferenzkurve für V2H")
+    ax.set_xlim(0.0, 0.4)
+    ax.legend()
+    ax.minorticks_on()
+    ax.grid(True, which="major", linewidth=0.8)
+    ax.grid(True, which="minor", linewidth=0.4, alpha=0.3)
+
+    return
+
+def save_indifference_curve_plots(output_dir):
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    x = [0.0 + (0.4 * i / 200.0) for i in range(201)]
+    plot_specs = [
+        ("04_indifference_curve_v2g.png", plot_indifference_curve_v2g),
+        ("05_indifference_curve_v2h.png", plot_indifference_curve_v2h),
+    ]
+
+    for filename, render_plot in plot_specs:
+        fig, ax = plt.subplots(figsize=(8.5, 4.1))
+        render_plot(ax, x, show_title=False)
+        fig.tight_layout()
+        fig.savefig(output_dir / filename, dpi=300, bbox_inches="tight")
+        plt.close(fig)
+
+    print(f"Saved indifference curve plots to {output_dir}")
 
 def plot_carpet(
     ax,
@@ -839,6 +859,53 @@ def plot_home_grid_price_carpet_from_initial_data(initial_data_path):
     plt.show()
 
     return
+
+
+def save_first_three_electricity_price_plots(data, output_dir):
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    plot_specs = [
+        (
+            "01_electricity_price_over_time.png",
+            (13.5, 4.1),
+            lambda ax: plot_electricity_price(ax, data.time, data.electricity_prices, title=None),
+        ),
+        (
+            "02_sorted_dynamic_electricity_price.png",
+            (8.5, 4.1),
+            lambda ax: plot_priced_hours(ax, data.electricity_prices, title=None),
+        ),
+        (
+            "03_sorted_home_charge_price.png",
+            (8.5, 4.1),
+            lambda ax: plot_priced_hours(
+                ax,
+                data.home_buy_prices_at_home,
+                title=None,
+            ),
+        ),
+    ]
+
+    row_fig, row_axes = plt.subplots(1, len(plot_specs), figsize=(20.0, 4.5))
+    if len(plot_specs) == 1:
+        row_axes = [row_axes]
+
+    for ax, (_, _, render_plot) in zip(row_axes, plot_specs):
+        render_plot(ax)
+
+    row_fig.tight_layout()
+    row_fig.savefig(output_dir / "first_three_plots_top_row.png", dpi=300, bbox_inches="tight")
+    plt.close(row_fig)
+
+    for filename, figsize, render_plot in plot_specs:
+        fig, ax = plt.subplots(figsize=figsize)
+        render_plot(ax)
+        fig.tight_layout()
+        fig.savefig(output_dir / filename, dpi=300, bbox_inches="tight")
+        plt.close(fig)
+
+    print(f"Saved top row and first three electricity price plots to {output_dir}")
 
 
 def plot_profitability_carpet_poster(initial_data_path):
@@ -1527,7 +1594,7 @@ def main():
     output_folder_path = "/Users/anton.atkins/Documents/TU Berlin/Bachelor Arbeit/code/New_ModelV2/Home_optimizationV2/Outputs_Systemintegration_kosten"
     poster_output_folder_path = "/Users/anton.atkins/Documents/TU Berlin/Bachelor Arbeit/code/New_ModelV2/Home_optimizationV2/Outputs_Systemintegration_kosten"
     # For the electricity price plots, use one of the renamed outputs folders by default.
-    results_data_path = "/Users/anton.atkins/Documents/TU Berlin/Bachelor Arbeit/code/New_ModelV2/Home_optimizationV2/Outputs_Systemintegration_kosten/outputs_2_Tesla3_V3_79.5KWh_NonCommuter_0.3deg_noMispel/mpc_results.csv"
+    results_data_path = "/Users/anton.atkins/Documents/TU Berlin/Bachelor Arbeit/code/New_ModelV2/Home_optimizationV2/Outputs_Systemintegration_kosten/outputs_3_Tesla3_V3_79.5KWh_NonCommuter_0.3deg_Mispel/mpc_results.csv"
     initial_data_path = "/Users/anton.atkins/Documents/TU Berlin/Bachelor Arbeit/code/New_ModelV2/Home_optimizationV2/data/LPG_FlexEhome_2025_Tesla3_79.5_Commuter.csv"
 
     if choice == "1":
@@ -1535,17 +1602,22 @@ def main():
 
         #Plotting Electricity Prices and Profitability Windows
         fig, axes = plt.subplots(2, 4, figsize=(16, 8))
-        x = [0.0, 0.1, 0.2]
+        x = [0.0 + (0.4 * i / 200.0) for i in range(201)]
         plot_electricity_price(axes[0, 0], data.time, data.electricity_prices)
-        plot_priced_hours(axes[0, 1], data.electricity_prices, "Sorted Dynamic Electricity Price")
+        plot_priced_hours(axes[0, 1], data.electricity_prices, "Sortierter dynamischer Strompreis")
         plot_price_deltas_with_profit_in24h(axes[1, 0], data.time, data.day_ahead_price, data.home_buy_prices)
         plot_price_deltas_with_profit_in24h(axes[1, 1], data.time, data.day_ahead_price, data.home_buy_prices, data.discharging_mask, data.ev_at_home_mask, True)
-        plot_priced_hours(axes[0, 2], data.home_buy_prices_at_home, "Sorted Dynamic EV Home Charge Price When EV Is At Home")
+        plot_priced_hours(axes[0, 2], data.home_buy_prices_at_home, "Sortierter dynamischer Heimladetarif, wenn das E-Fahrzeug zu Hause ist")
         plot_weighted_grid_import_price(axes[0, 3], data.grid_import_kwh, data.electricity_prices)
         plot_indifference_curve_v2g(axes[1, 2], x)
-        plot_sorted_buy_prices_with_best_future_sell_price(axes[1, 3], data.home_buy_prices)
+        plot_indifference_curve_v2h(axes[1, 3], x)
         plt.tight_layout()
         plt.show()
+        save_first_three_electricity_price_plots(
+            data,
+            Path(output_folder_path) / "electricity_price_plots",
+        )
+        save_indifference_curve_plots(Path(output_folder_path) / "electricity_price_plots")
 
     elif choice == "2":
         wanted_columns = ["external_charge_public_kwh", "external_charge_workplace_kwh", "external_charge_fast75_kwh", "external_charge_fast150_kwh", "grid_import_kwh", "ev_consumption_kwh", "ev_discharge_to_home_kwh", "ev_discharge_to_grid_kwh", "home_load_grid_import_kwh", "home_ev_charge_kwh", "ev_initial_energy_kwh", "ev_final_energy_kwh"]
@@ -1576,4 +1648,25 @@ def main():
 
     elif choice == "8":
         fig, ax = plt.subplots(figsize=(13.5, 4.1))
-        plot_home_import_price_br
+        plot_home_import_price_breakdown(ax, initial_data_path, show_title=False)
+        plt.tight_layout(rect=(0, 0.03, 0.86, 0.95))
+        plt.show()
+
+    elif choice == "9":
+        plot_home_grid_price_carpet_from_initial_data(initial_data_path)
+
+    else:
+        print("Invalid choice. Please enter 1, 2, 3, 4, 5, 6, 7, 8 or 9.")
+
+
+    return
+
+if __name__ =="__main__":
+    main()
+
+
+    
+
+
+
+        

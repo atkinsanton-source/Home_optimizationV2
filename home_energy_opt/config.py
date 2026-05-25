@@ -103,21 +103,18 @@ class EnergySystemConfig:
     bat_p_ch_max_kw: float = 6.0
     bat_p_dis_max_kw: float = 6.0
 
-    # MPC
+    # MPC / solver
     horizon_steps: int = 96
-    gurobi_mipgap: float = 1e-4
-    gurobi_threads: Optional[int] = None
-    gurobi_mipfocus: Optional[int] = None
-    use_persistent_gurobi: bool = True
-    use_mip_start: bool = True
+    milp_rel_gap: float = 1e-4
+    milp_time_limit_sec: Optional[float] = None
     mpc_apply_steps: int = 1
-    pad_tail_neutral_prices: bool = True                #maybe remove
-    pad_tail_price_eur_per_kwh: float = 0.0             #maybe remove
+    pad_tail_neutral_prices: bool = True
+    pad_tail_price_eur_per_kwh: float = 0.0
 
     # Extension hooks
     enable_battery_degradation_cost: bool = False
     battery_degradation_eur_per_kwh: float = 0.0
-    ev_degradation_eur_per_kwh_charged: float = 0.067*0.3
+    ev_degradation_eur_per_kwh_charged: float = 0.067*0.25
 
     def __post_init__(self) -> None:
         if self.apply_version_preset:

@@ -27,20 +27,12 @@ def parse_args() -> argparse.Namespace:
         default=2.0,
         help="Always print MPC progress for a step if its solve time exceeds this threshold in seconds",
     )
-    p.add_argument("--solver-tee", action="store_true", help="Print full Gurobi output for each MPC window solve")
-    p.add_argument("--mipgap", type=float, default=1e-4, help="Gurobi MIP gap")
-    p.add_argument("--threads", type=int, default=None, help="Gurobi threads")
-    p.add_argument("--mipfocus", type=int, choices=[0, 1, 2, 3], default=None, help="Gurobi MIPFocus")
+    p.add_argument("--milp-rel-gap", type=float, default=1e-4, help="Relative optimality gap for the MILP solver")
     p.add_argument(
-        "--legacy-gurobi-rebuild",
-        action="store_true",
-        help="Use old gurobi mode that rebuilds the model every MPC step",
-    )
-    p.add_argument(
-        "--use-mip-start",
-        action=argparse.BooleanOptionalAction,
+        "--milp-time-limit-sec",
+        type=float,
         default=None,
-        help="Enable/disable rolling MIP start for persistent gurobi mode",
+        help="Optional solve time limit in seconds for each MPC window",
     )
     return p.parse_args()
 
@@ -261,33 +253,25 @@ def main() -> None:
     cfg = EnergySystemConfig(
         system_version=args.system_version,
         horizon_steps=args.horizon,
-        gurobi_mipgap=args.mipgap,
-        gurobi_threads=args.threads,
-        gurobi_mipfocus=args.mipfocus,
+        milp_rel_gap=args.milp_rel_gap,
+        milp_time_limit_sec=args.milp_time_limit_sec,
     )
-    if args.use_mip_start is not None:
-        cfg.use_mip_start = args.use_mip_start
     comparison_apply_steps = max(1, int(round(3.0 / cfg.dt_hours)))
     cfg_mpc_dynamic_v1 = EnergySystemConfig(
         system_version=1,
         horizon_steps=args.horizon,
-        gurobi_mipgap=args.mipgap,
-        gurobi_threads=args.threads,
-        gurobi_mipfocus=args.mipfocus,
+        milp_rel_gap=args.milp_rel_gap,
+        milp_time_limit_sec=args.milp_time_limit_sec,
         mpc_apply_steps=comparison_apply_steps,
     )
     cfg_mpc_static = EnergySystemConfig(
         system_version=1,
         horizon_steps=args.horizon,
-        gurobi_mipgap=args.mipgap,
-        gurobi_threads=args.threads,
-        gurobi_mipfocus=args.mipfocus,
+        milp_rel_gap=args.milp_rel_gap,
+        milp_time_limit_sec=args.milp_time_limit_sec,
         mpc_apply_steps=comparison_apply_steps,
     )
     cfg_mpc_static.static_mpc_import_price_eur_per_kwh = cfg.static_mpc_import_price_eur_per_kwh
-    if args.use_mip_start is not None:
-        cfg_mpc_dynamic_v1.use_mip_start = args.use_mip_start
-        cfg_mpc_static.use_mip_start = args.use_mip_start
 
     # 1) Load and validate the raw input file.
     t_stage = perf_counter()
@@ -347,9 +331,6 @@ def main() -> None:
         cfg,
         progress_every=args.progress_every,
         slow_step_sec=args.slow_step_sec,
-        solver_tee=args.solver_tee,
-        use_persistent_gurobi=not args.legacy_gurobi_rebuild,
-        use_mip_start=args.use_mip_start,
     )
     print(f"[stage] Running MPC loop done in {perf_counter() - t_stage:.2f}s", flush=True)
 
@@ -360,9 +341,6 @@ def main() -> None:
         cfg_mpc_dynamic_v1,
         progress_every=args.progress_every,
         slow_step_sec=args.slow_step_sec,
-        solver_tee=args.solver_tee,
-        use_persistent_gurobi=not args.legacy_gurobi_rebuild,
-        use_mip_start=args.use_mip_start,
     )
     print(f"[stage] Running dynamic V1 MPC loop done in {perf_counter() - t_stage:.2f}s", flush=True)
 
@@ -373,9 +351,6 @@ def main() -> None:
         cfg_mpc_static,
         progress_every=args.progress_every,
         slow_step_sec=args.slow_step_sec,
-        solver_tee=args.solver_tee,
-        use_persistent_gurobi=not args.legacy_gurobi_rebuild,
-        use_mip_start=args.use_mip_start,
     )
     print(f"[stage] Running static MPC loop done in {perf_counter() - t_stage:.2f}s", flush=True)
 
