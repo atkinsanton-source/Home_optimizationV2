@@ -1,24 +1,6 @@
-# Ignore everything by default
-*
-
-# Keep gitignore itself
-!.gitignore
-!requirements.txt
-!README.md
-
-# Track only Python source files in home_energy_opt
-!home_energy_opt/
-!home_energy_opt/**/*.py
-
-# Track only CSV files in data
-!data/
-!data/**/*.csv
-
-# Track selected utility scripts (source only)
-!scripts/
-!scripts/electricity_price_plot.py
-!scripts/regression_persistent_mpc.py
-!scripts/plot_dashboard_from_outputs.py
-
-# Track changes to the draw.io file
-!!**/*.draw.io
+.DS_Store
+.venv/
+outputs_smoke/
+.git.broken_backup_20260526/
+__pycache__/
+*.pyc

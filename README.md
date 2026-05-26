@@ -4,14 +4,14 @@ Modular Python project for year-long 15-minute home energy simulation with three
 
 1. **Baseline rule-based control (dynamic home import price)**
 2. **Baseline rule-based control (static home import price)**
-3. **MPC optimization (SciPy/HiGHS rolling-horizon MILP)**
+3. **MPC optimization (persistent HiGHS rolling-horizon model)**
 
 ## Structure
 
 - `home_energy_opt/config.py`: central dataclass for all parameters
 - `home_energy_opt/data.py`: CSV loading, timezone-aware indexing, preprocessing and derived columns
 - `home_energy_opt/baseline.py`: step-by-step non-optimizing baseline simulation
-- `home_energy_opt/mpc.py`: receding-horizon MPC loop and MILP window model
+- `home_energy_opt/mpc.py`: receding-horizon MPC loop and persistent MILP window model
 - `home_energy_opt/metrics.py`: KPI calculation
 - `home_energy_opt/plots.py`: interactive Plotly dashboard export
 - `home_energy_opt/main.py`: CLI entry point
@@ -57,8 +57,6 @@ Outputs:
 - `metrics_comparison.csv`
 - `system_connection_comparison_interactive.html` (interactive zoom/pan with dynamic axes after reopening; includes Overview + Flow Balance sections with `sources < 0`, `sinks > 0`)
 - `plotly.min.js` (local Plotly runtime copied next to the HTML for offline interaction)
-
-The MPC backend uses SciPy's `milp` interface, which is powered by HiGHS.
 
 ## Baseline Static Price Knob
 
