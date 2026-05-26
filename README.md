@@ -71,4 +71,4 @@ To model a wallbox-specific state discount, set `wallbox_cost_discount_eur_per_k
 - EV power limits currently derive from `EV_state == "home"` with fixed home limits; can be replaced by time-series columns (`P_ev_ch_max_kw[t]`, `P_ev_dis_max_kw[t]`).
 - Export remuneration uses constant placeholder (`0.0778 EUR/kWh`), ready to replace with regulation-aware function.
 - Objective already includes a hook for battery degradation.
-- Thermal coupling (DHW/S
+- Thermal coupling (DHW/SH) can be integrated as additional buses/storages/constraints in MPC.
