@@ -74,7 +74,7 @@ class EnergySystemConfig:
     # Export remuneration
     export_price_source: str = "dynamic"  # "fixed" or "dynamic"
     export_price_eur_per_kwh: float = 0.0778
-    export_price_adder_eur_per_kwh: float = 0.0#0.0888*0.4 + 0.00530 + 0.01120 + 0.01860 Stromnetz Berlin dokument für 2026 Netzentgelt + KWKG Umlage 2026 Berlin + Offshore Umlage 2026 + StromNEV Umlage 2026
+    export_price_adder_eur_per_kwh: float = 0.0888*0.4 + 0.00530 + 0.01120 + 0.01860 #Stromnetz Berlin dokument für 2026 Netzentgelt + KWKG Umlage 2026 Berlin + Offshore Umlage 2026 + StromNEV Umlage 2026
     export_price_deduction_eur_per_kwh: float = 0.0
 
     # EV
@@ -107,7 +107,7 @@ class EnergySystemConfig:
     horizon_steps: int = 96
     milp_rel_gap: float = 1e-4
     milp_time_limit_sec: Optional[float] = None
-    mpc_apply_steps: int = 1
+    mpc_apply_steps: int = 4
     pad_tail_neutral_prices: bool = True
     pad_tail_price_eur_per_kwh: float = 0.0
 
