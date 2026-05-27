@@ -1,5 +1,4 @@
 pandas
 matplotlib
 plotly
-oemof-solph
 gurobipy
