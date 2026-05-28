@@ -46,12 +46,19 @@ POSTER_COSTS_REVENUES_ROW_LABELS = {
 POSTER_ENERGY_ROW_LABELS = POSTER_COSTS_REVENUES_ROW_LABELS
 
 
-def _scenario_fragment_mask(cost_and_revenue_data, fragments):
+def _scenario_suffix_mask(cost_and_revenue_data, suffixes):
     scenario_values = cost_and_revenue_data["scenario"].astype(str)
     mask = pd.Series(False, index=cost_and_revenue_data.index)
-    for fragment in fragments:
-        mask |= scenario_values.str.contains(fragment, case=False, regex=False, na=False)
+    for suffix in suffixes:
+        mask |= scenario_values.str.endswith(suffix, na=False)
     return mask
+
+
+def _poster_scenario_sources(cost_and_revenue_data):
+    source_v2 = cost_and_revenue_data[_scenario_suffix_mask(cost_and_revenue_data, ["_V2"])]
+    source_v3_no_mispel = cost_and_revenue_data[_scenario_suffix_mask(cost_and_revenue_data, ["_nomispel_V3"])]
+    source_v3_mispel = cost_and_revenue_data[_scenario_suffix_mask(cost_and_revenue_data, ["_mispel_V3"])]
+    return source_v2, source_v3_no_mispel, source_v3_mispel
 
 
 def _build_poster_row(source_data, scenario_group_label, display_label, model_name, display_order):
@@ -1094,22 +1101,10 @@ def plot_costs_and_revenues(cost_and_revenue_data):
 
 def plot_costs_and_revenues_poster(cost_and_revenue_data):
     cost_and_revenue_data = cost_and_revenue_data.copy()
-    source_v2 = cost_and_revenue_data[_scenario_fragment_mask(cost_and_revenue_data, ["Tesla3_V2_79.5KWh_NonCommuter"])]
-    source_v3_no_mispel = cost_and_revenue_data[
-        _scenario_fragment_mask(
-            cost_and_revenue_data,
-            ["Tesla3_V3_79.5KWh_NonCommuter_0.3deg_noMispel", "Tesla3_V3_79.5KWh_NonCommuter_0deg"],
-        )
-    ]
-    source_v3_mispel = cost_and_revenue_data[
-        _scenario_fragment_mask(
-            cost_and_revenue_data,
-            ["Tesla3_V3_79.5KWh_NonCommuter_0.3deg_Mispel"],
-        )
-    ]
+    source_v2, source_v3_no_mispel, source_v3_mispel = _poster_scenario_sources(cost_and_revenue_data)
 
     if source_v2.empty or source_v3_no_mispel.empty or source_v3_mispel.empty:
-        print("Missing V2, V3 no Mispel, or V3 Mispel scenario data for the poster plot.")
+        print("Missing V2, nomispel_V3, or mispel_V3 scenario data for the poster plot.")
         return
 
     poster_rows = []
@@ -1415,22 +1410,10 @@ def plot_energy_sinks_sources(cost_and_revenue_data):
 
 def plot_energy_sinks_sources_poster(cost_and_revenue_data):
     cost_and_revenue_data = cost_and_revenue_data.copy()
-    source_v2 = cost_and_revenue_data[_scenario_fragment_mask(cost_and_revenue_data, ["Tesla3_V2_79.5KWh_NonCommuter"])]
-    source_v3_no_mispel = cost_and_revenue_data[
-        _scenario_fragment_mask(
-            cost_and_revenue_data,
-            ["Tesla3_V3_79.5KWh_NonCommuter_0.3deg_noMispel", "Tesla3_V3_79.5KWh_NonCommuter_0deg"],
-        )
-    ]
-    source_v3_mispel = cost_and_revenue_data[
-        _scenario_fragment_mask(
-            cost_and_revenue_data,
-            ["Tesla3_V3_79.5KWh_NonCommuter_0.3deg_Mispel"],
-        )
-    ]
+    source_v2, source_v3_no_mispel, source_v3_mispel = _poster_scenario_sources(cost_and_revenue_data)
 
     if source_v2.empty or source_v3_no_mispel.empty or source_v3_mispel.empty:
-        print("Missing V2, V3 no Mispel, or V3 Mispel scenario data for the energy poster plot.")
+        print("Missing V2, nomispel_V3, or mispel_V3 scenario data for the energy poster plot.")
         return
 
     poster_rows = []
@@ -1524,11 +1507,11 @@ def main():
     print("9: Home grid price carpet from initial data")
     choice = input("Enter 1, 2, 3, 4, 5, 6, 7, 8 or 9: ")
 
-    output_folder_path = "/Users/anton.atkins/Documents/TU Berlin/Bachelor Arbeit/code/New_ModelV2/Home_optimizationV2/Outputs_Systemintegration_kosten"
-    poster_output_folder_path = "/Users/anton.atkins/Documents/TU Berlin/Bachelor Arbeit/code/New_ModelV2/Home_optimizationV2/Outputs_Systemintegration_kosten"
+    output_folder_path = "/Users/anton.atkins/Documents/Bachelorarbeit-code/Home_energy_optimization_BA/Home_optimizationV2/outputs_Tesla/outputs_tsla_nocommuter_0.6deg"
+    poster_output_folder_path = "/Users/anton.atkins/Documents/Bachelorarbeit-code/Home_energy_optimization_BA/Home_optimizationV2/outputs_Tesla/outputs_tsla_nocommuter_0.6deg"
     # For the electricity price plots, use one of the renamed outputs folders by default.
-    results_data_path = "/Users/anton.atkins/Documents/TU Berlin/Bachelor Arbeit/code/New_ModelV2/Home_optimizationV2/Outputs_Systemintegration_kosten/outputs_2_Tesla3_V3_79.5KWh_NonCommuter_0.3deg_noMispel/mpc_results.csv"
-    initial_data_path = "/Users/anton.atkins/Documents/TU Berlin/Bachelor Arbeit/code/New_ModelV2/Home_optimizationV2/data/LPG_FlexEhome_2025_Tesla3_79.5_Commuter.csv"
+    results_data_path = "/Users/anton.atkins/Documents/Bachelorarbeit-code/Home_energy_optimization_BA/Home_optimizationV2/outputs_Tesla/outputs_tsla_commuter_0.25deg/outputs_tsla_commuter_nomispel_V3/mpc_results.csv"
+    initial_data_path = "/Users/anton.atkins/Documents/Bachelorarbeit-code/Home_energy_optimization_BA/Home_optimizationV2/data/LPG_FlexEhome_2025_Tesla3_79.5_Commuter.csv"
 
     if choice == "1":
         data = ElectricityPriceData.from_csv(results_data_path, initial_data_path)
@@ -1576,4 +1559,13 @@ def main():
 
     elif choice == "8":
         fig, ax = plt.subplots(figsize=(13.5, 4.1))
-        plot_home_import_price_br
+        plot_home_import_price_breakdown(ax, initial_data_path)
+        plt.tight_layout()
+        plt.show()
+
+    elif choice == "9":
+        plot_home_grid_price_carpet_from_initial_data(initial_data_path)
+
+
+if __name__ == "__main__":
+    main()

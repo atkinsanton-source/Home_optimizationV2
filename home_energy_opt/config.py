@@ -74,7 +74,7 @@ class EnergySystemConfig:
     # Export remuneration
     export_price_source: str = "dynamic"  # "fixed" or "dynamic"
     export_price_eur_per_kwh: float = 0.0778
-    export_price_adder_eur_per_kwh: float = 0.0888*0.4 + 0.00530 + 0.01120 + 0.01860 #Stromnetz Berlin dokument für 2026 Netzentgelt + KWKG Umlage 2026 Berlin + Offshore Umlage 2026 + StromNEV Umlage 2026
+    export_price_adder_eur_per_kwh: float = 0.0#0.0888*0.4 + 0.00530 + 0.01120 + 0.01860 #Stromnetz Berlin dokument für 2026 Netzentgelt + KWKG Umlage 2026 Berlin + Offshore Umlage 2026 + StromNEV Umlage 2026
     export_price_deduction_eur_per_kwh: float = 0.0
 
     # EV
@@ -117,7 +117,7 @@ class EnergySystemConfig:
     # Extension hooks
     enable_battery_degradation_cost: bool = False
     battery_degradation_eur_per_kwh: float = 0.0
-    ev_degradation_eur_per_kwh_charged: float = 0.067*0.25
+    ev_degradation_eur_per_kwh_charged: float = 0.067*0.1
 
     def __post_init__(self) -> None:
         if self.apply_version_preset:
